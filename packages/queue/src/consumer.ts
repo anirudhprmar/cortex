@@ -1,41 +1,63 @@
+import { randomUUID } from 'node:crypto'
 import { redis } from './client'
+import type { ConsumerGroupName, ConsumerName, JobHandler, JobPayload, StreamName } from './types'
 
-type JobHandler = (id: string, fields: Record<string, string>) => Promise<void>
+type StreamEntry = [id: string, fields: string[]]
 
-const CONSUMER_NAME = `worker-${process.pid}`
+type XReadGroupReply = [streamName: string, entries: StreamEntry[]][]
 
-async function ensureGroup(stream: string, group: string) {
+export interface ConsumeOptions {
+  consumerName?: ConsumerName
+  batchSize?: number
+  blockMs?: number
+  signal?: AbortSignal
+}
+
+async function ensureGroup(stream: StreamName, group: ConsumerGroupName) {
   try {
     await redis.xgroup('CREATE', stream, group, '$', 'MKSTREAM')
   } catch (err: any) {
     if (!err.message.includes('BUSYGROUP')) throw err
-    // group already exists — fine, no-op
   }
 }
 
-function arrayToObject(fields: string[]): Record<string, string> {
-  const obj: Record<string, string> = {}
+function arrayToObject(fields: string[]): JobPayload {
+  // XREADGROUP returns fields as a flat [key, value, key, value, ...] list,
+  // so the count is always even and the pair is never undefined
+  const obj: JobPayload = {}
   for (let i = 0; i < fields.length; i += 2) {
-    obj[fields[i]] = fields[i + 1]
+    obj[fields[i]!] = fields[i + 1]!
   }
   return obj
 }
 
-export async function consume(stream: string, group: string, handler: JobHandler) {
+export async function consume(
+  stream: StreamName,
+  group: ConsumerGroupName,
+  handler: JobHandler,
+  options: ConsumeOptions = {}
+): Promise<void> {
   await ensureGroup(stream, group)
 
-  while (true) {
-    const results = await redis.xreadgroup(
-      'GROUP', group, CONSUMER_NAME,
-      'COUNT', 10,
-      'BLOCK', 5000,
+  const consumerName =
+    options.consumerName ?? `worker-${process.pid}-${randomUUID().slice(0, 8)}`
+  const batchSize = options.batchSize ?? 10
+  const blockMs = options.blockMs ?? 5000
+
+  while (!options.signal?.aborted) {
+    const results = (await redis.xreadgroup(
+      'GROUP', group, consumerName,
+      'COUNT', batchSize,
+      'BLOCK', blockMs,
       'STREAMS', stream, '>'
-    )
+    )) as XReadGroupReply | null
 
     if (!results) continue // timed out, no new entries — loop again
 
-    // results shape: [[streamName, [[id, fields], [id, fields], ...]]]
-    const [[, entries]] = results as [string, [string, string[]][]][]
+    const first = results[0]
+    if (!first) continue
+
+    const [, entries] = first
 
     for (const [id, fields] of entries) {
       const payload = arrayToObject(fields)
@@ -44,13 +66,8 @@ export async function consume(stream: string, group: string, handler: JobHandler
         await redis.xack(stream, group, id)
       } catch (err) {
         console.error(`Handler failed for ${id}:`, err)
-        // deliberately not acking — stays in PEL for retry logic later
+        // deliberately not acking — stays in the PEL so it can be retried/reclaimed later
       }
     }
   }
 }
-
-consume('index-jobs', 'index-workers', async (id, payload) => {
-  console.log('Processing job', id, payload)
-  // actual indexing logic goes here later
-})
