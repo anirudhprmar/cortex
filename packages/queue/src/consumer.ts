@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { redis } from './client'
-import type { ConsumerGroupName, ConsumerName, JobHandler, JobPayload, StreamName } from './types'
+import { arrayToObject } from './fields'
+import type { ConsumerGroupName, ConsumerName, JobHandler, StreamName } from './types'
 
 type StreamEntry = [id: string, fields: string[]]
 
@@ -19,16 +20,6 @@ async function ensureGroup(stream: StreamName, group: ConsumerGroupName) {
   } catch (err: any) {
     if (!err.message.includes('BUSYGROUP')) throw err
   }
-}
-
-function arrayToObject(fields: string[]): JobPayload {
-  // XREADGROUP returns fields as a flat [key, value, key, value, ...] list,
-  // so the count is always even and the pair is never undefined
-  const obj: JobPayload = {}
-  for (let i = 0; i < fields.length; i += 2) {
-    obj[fields[i]!] = fields[i + 1]!
-  }
-  return obj
 }
 
 export async function consume(

@@ -1,6 +1,7 @@
 export { redis } from './client'
 export { publish } from './producer'
 export { consume } from './consumer'
+export { reclaim } from './reclaim'
 export type {
   StreamName,
   ConsumerGroupName,
@@ -10,3 +11,4 @@ export type {
 } from './types'
 export type { PublishOptions } from './producer'
 export type { ConsumeOptions } from './consumer'
+export type { ReclaimOptions, ReclaimSummary, DeadLetterEntry } from './reclaim'
