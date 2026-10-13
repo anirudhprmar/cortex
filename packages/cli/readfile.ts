@@ -1,8 +1,12 @@
 import matter from "gray-matter";
 import path from "node:path";
+import { z } from "zod";
 import { getValidFiles } from "./getvalidfiles";
 import { readFile as fsReadFile, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { getExistingDocFromDb, insertDoc, updateDoc } from "db";
+
+const scopeSchema = z.enum(["work", "personal"]);
 
 type ProcessedFile = {
   path: string;
@@ -11,15 +15,27 @@ type ProcessedFile = {
   content: string;
 };
 
-type ExistingDoc = { hash: string } | null;
+function toDocFields(absPath: string, rawContent: string) {
+  const parsed = matter(rawContent);
+  const ext = path.extname(absPath).toLowerCase();
+  const data = parsed.data as Record<string, unknown>;
 
-// TODO: replace with real DB lookup by absolute path.
-// const existingDoc = await getExistingDocFromDb(absPath);
-async function getExistingDocFromDb(_absPath: string): Promise<ExistingDoc> {
-  return null;
+  return {
+    title:
+      typeof data.title === "string"
+        ? data.title
+        : path.basename(absPath, ext),
+    content: parsed.content,
+    modality: (ext === ".txt" ? "text" : "markdown") as "markdown" | "text",
+    data,
+  };
 }
 
-export async function readFiles(dirPath: string): Promise<ProcessedFile[]> {
+export async function readFiles(
+  dirPath: string,
+  scope = "personal",
+): Promise<ProcessedFile[]> {
+  const docScope = scopeSchema.parse(scope);
   const stats = await stat(dirPath);
   const filePaths = stats.isFile() ? [dirPath] : await getValidFiles(dirPath);
   const processedFiles: ProcessedFile[] = [];
@@ -31,34 +47,50 @@ export async function readFiles(dirPath: string): Promise<ProcessedFile[]> {
 
       const currentHash = createHash("sha256").update(rawContent).digest("hex");
 
-      //query db to see if doc exists with its absolute path
       const existingDoc = await getExistingDocFromDb(absPath);
 
       if (!existingDoc) {
         // State 1: No row exists -> New document
-        const parsed = matter(rawContent);
+        const fields = toDocFields(absPath, rawContent);
         console.log(`[NEW] Adding document: ${absPath}`);
 
-        // TODO: Insert into DB -> (absPath, currentHash, parsed.data, parsed.content)
+        await insertDoc({
+          path: absPath,
+          title: fields.title,
+          content: fields.content,
+          contentHash: currentHash,
+          modality: fields.modality,
+          scope: docScope,
+        });
         processedFiles.push({
           path: absPath,
           hash: currentHash,
-          data: parsed.data as Record<string, unknown>,
-          content: parsed.content,
+          data: fields.data,
+          content: fields.content,
         });
-      } else if (existingDoc.hash === currentHash) {
+      } else if (existingDoc.contentHash === currentHash) {
         // State 2: Hash matches -> Skip it
         console.log(`[SKIP] No changes detected: ${absPath}`);
       } else {
         // State 3: Hash differs -> Changed document
-        const parsed = matter(rawContent);
+        const fields = toDocFields(absPath, rawContent);
         console.log(`[CHANGED] Updating document: ${absPath}`);
-        // TODO: Update DB row -> Set hash = currentHash, content = parsed.content, etc.
+
+        await updateDoc(
+          {
+            title: fields.title,
+            content: fields.content,
+            contentHash: currentHash,
+            modality: fields.modality,
+            scope: docScope,
+          },
+          absPath,
+        );
         processedFiles.push({
           path: absPath,
           hash: currentHash,
-          data: parsed.data as Record<string, unknown>,
-          content: parsed.content,
+          data: fields.data,
+          content: fields.content,
         });
       }
     } catch (err) {

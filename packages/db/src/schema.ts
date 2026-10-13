@@ -24,7 +24,7 @@ export const documents = pgTable("documents", {
   modality: text("modality", { enum: ["markdown", "text"] })
     .notNull()
     .default("markdown"),
-  scope: text("path").notNull().default("personal"),
+  scope: text("scope").notNull().default("personal"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .$defaultFn(() => new Date())

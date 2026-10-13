@@ -1,6 +1,9 @@
 {
   "name": "db",
   "module": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "type": "module",
   "private": true,
   "scripts": {
@@ -16,6 +19,7 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@paralleldrive/cuid2": "^3.3.0"
+    "@paralleldrive/cuid2": "^3.3.0",
+    "zod": "^4.6.6"
   }
 }

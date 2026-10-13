@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { resolvePath } from "./path-resolve";
+import { readFiles } from "./readfile";
 const program = new Command();
 
 program
@@ -15,14 +16,17 @@ program
     "type of note personal or work related",
     "personal",
   )
-  .action((pathArg, opts) => {
+  .action(async (pathArg, opts) => {
     try {
       const abs = resolvePath(pathArg);
-      console.log(abs, opts.scope);
+      const files = await readFiles(abs, opts.scope);
+      console.log(
+        `Ingested ${files.length} document(s) from ${abs} [scope: ${opts.scope}]`,
+      );
     } catch (err) {
       console.error((err as Error).message);
       process.exit(1);
     }
   });
 
-program.parse();
+await program.parseAsync();
