@@ -13,6 +13,12 @@
     "commander": "^15.0.0",
     "db": "workspace:*",
     "gray-matter": "^4.0.3",
+    "mdast": "^3.0.0",
+    "mdast-util-to-string": "^4.0.0",
+    "remark": "^15.0.1",
+    "remark-frontmatter": "^5.0.0",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5",
     "zod": "^4.6.6"
   }
 }
