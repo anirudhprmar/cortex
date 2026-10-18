@@ -4,15 +4,18 @@ import { z } from "zod";
 import { getValidFiles } from "./getvalidfiles";
 import { readFile as fsReadFile, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { getExistingDocFromDb, insertDoc, updateDoc } from "db";
+import { ingestDocument } from "db";
+import { chunkMd } from "./chunking";
 
 const scopeSchema = z.enum(["work", "personal"]);
 
 type ProcessedFile = {
   path: string;
+  docId: string;
   hash: string;
   data: Record<string, unknown>;
   content: string;
+  chunkCount: number;
 };
 
 function toDocFields(absPath: string, rawContent: string) {
@@ -46,53 +49,45 @@ export async function readFiles(
       const rawContent = await fsReadFile(absPath, "utf-8");
 
       const currentHash = createHash("sha256").update(rawContent).digest("hex");
+      const fields = toDocFields(absPath, rawContent);
+      const fileChunks = chunkMd(fields.content, absPath);
 
-      const existingDoc = await getExistingDocFromDb(absPath);
-
-      if (!existingDoc) {
-        // State 1: No row exists -> New document
-        const fields = toDocFields(absPath, rawContent);
-        console.log(`[NEW] Adding document: ${absPath}`);
-
-        await insertDoc({
+      const result = await ingestDocument(
+        {
           path: absPath,
           title: fields.title,
           content: fields.content,
           contentHash: currentHash,
           modality: fields.modality,
           scope: docScope,
-        });
-        processedFiles.push({
-          path: absPath,
-          hash: currentHash,
-          data: fields.data,
-          content: fields.content,
-        });
-      } else if (existingDoc.contentHash === currentHash) {
-        // State 2: Hash matches -> Skip it
-        console.log(`[SKIP] No changes detected: ${absPath}`);
-      } else {
-        // State 3: Hash differs -> Changed document
-        const fields = toDocFields(absPath, rawContent);
-        console.log(`[CHANGED] Updating document: ${absPath}`);
+        },
+        fileChunks.map((chunk) => ({
+          headingPath: chunk.locator.headingPath,
+          startLine: chunk.locator.lineRange.start,
+          endLine: chunk.locator.lineRange.end,
+          content: chunk.content,
+        })),
+      );
 
-        await updateDoc(
-          {
-            title: fields.title,
-            content: fields.content,
-            contentHash: currentHash,
-            modality: fields.modality,
-            scope: docScope,
-          },
-          absPath,
-        );
-        processedFiles.push({
-          path: absPath,
-          hash: currentHash,
-          data: fields.data,
-          content: fields.content,
-        });
+      if (result.skipped) {
+        console.log(`[SKIP] No changes detected: ${absPath}`);
+        continue;
       }
+
+      const label = result.isNew ? "NEW" : "CHANGED";
+      const verb = result.isNew ? "Added" : "Updated";
+      console.log(
+        `[${label}] ${verb} document: ${absPath} (id: ${result.docId}, chunks: ${result.chunkCount})`,
+      );
+
+      processedFiles.push({
+        path: absPath,
+        docId: result.docId,
+        hash: currentHash,
+        data: fields.data,
+        content: fields.content,
+        chunkCount: result.chunkCount,
+      });
     } catch (err) {
       console.error(`Failed to read file at ${filePath}:`, err);
     }

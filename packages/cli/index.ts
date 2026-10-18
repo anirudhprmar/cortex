@@ -1,7 +1,6 @@
 import { Command } from "commander";
 import { resolvePath } from "./path-resolve";
 import { readFiles } from "./readfile";
-import { chunkMd } from "./chunking";
 const program = new Command();
 
 program
@@ -21,14 +20,10 @@ program
     try {
       const abs = resolvePath(pathArg);
       const files = await readFiles(abs, opts.scope);
+      const totalChunks = files.reduce((sum, f) => sum + f.chunkCount, 0);
       console.log(
-        `Ingested ${files.length} document(s) from ${abs} [scope: ${opts.scope}]`,
+        `Ingested ${files.length} document(s) (${totalChunks} chunk(s)) from ${abs} [scope: ${opts.scope}]`,
       );
-      console.log('Beginning to Chunk...')
-      for (const md of files) {
-        const chunks = chunkMd(md.content, md.path)
-        console.log(chunks)
-      }
     } catch (err) {
       console.error((err as Error).message);
       process.exit(1);

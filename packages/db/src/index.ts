@@ -8,3 +8,4 @@ const client = postgres(connectionString)
 export const db = drizzle(client, { schema })
 export * from './schema'
 export * from './documents'
+export * from './ingest'
