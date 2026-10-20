@@ -6,6 +6,14 @@ const TYPE_GUIDANCE: Record<EntityType, string> = {
   person: "individual humans, by name",
   concept:
     "ideas, fields, methods, qualities, or other abstract things (e.g. latency, machine learning)",
+  organization:
+    "companies, institutions, groups, or communities (e.g. OpenAI, Anthropic, Apache Foundation)",
+  project:
+    "named projects, repositories, products, or initiatives (e.g. cortex, React, Next.js)",
+  place: "locations, regions, countries, cities, or physical places (e.g. San Francisco, London)",
+  event:
+    "meetings, conferences, releases, deadlines, or occurrences (e.g. NeurIPS 2025, Product Hunt launch)",
+  other: "named entities that don't fit the above categories",
 };
 
 const allowedTypes = ENTITY_TYPES.map((t) => `- "${t}": ${TYPE_GUIDANCE[t]}`).join(
