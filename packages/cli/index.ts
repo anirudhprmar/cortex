@@ -1,6 +1,9 @@
 import { Command } from "commander";
 import { resolvePath } from "./path-resolve";
 import { readFiles } from "./readfile";
+import { chunkMd } from "./chunking";
+import { extractMemories } from "extraction";
+
 const program = new Command();
 
 program
@@ -24,6 +27,15 @@ program
       console.log(
         `Ingested ${files.length} document(s) (${totalChunks} chunk(s)) from ${abs} [scope: ${opts.scope}]`,
       );
+      for (const file of files) {
+        const chunks = chunkMd(file.content, file.path);
+
+        for (const chunk of chunks) {
+          const result = await extractMemories(chunk.content);
+          console.log(JSON.stringify(result));
+        }
+      }
+
     } catch (err) {
       console.error((err as Error).message);
       process.exit(1);

@@ -21,16 +21,19 @@ const allowedTypes = ENTITY_TYPES.map((t) => `- "${t}": ${TYPE_GUIDANCE[t]}`).jo
 );
 const typeUnion = ENTITY_TYPES.map((t) => `"${t}"`).join(" | ");
 
-export const extractionSystemPrompt = `You extract facts from a single chunk of a document.
+export const extractionSystemPrompt = `You extract facts from a single chunk of a document written by the author (actual name of the author).
 
 Rules:
 - Include only what the text states. Do not infer, summarize, or add outside knowledge.
-- Each fact is one self-contained claim that can be judged true or false from the text alone.
-- Every fact must include an "entities" list (use [] if it has no entities). Each entity needs a short canonical "name" and exactly one "type" with one of these values:
-${allowedTypes}
-- Never use a type outside that list; if none fits, drop the entity rather than guessing.
-- If the chunk has no factual content (bare headings, link lists, opinions, filler), return an empty list: {"facts": []}.
-- Respond with a single JSON object of the shape {"facts": [{"claim": string, "entities": [{"name": string, "type": ${typeUnion}]}]}] and nothing else — no prose, no code fences.`;
+- Each fact is one complete, self-contained sentence that can be judged true or false from the text alone.
+- Name the subject in every claim. Never use "I", "me", "my", "it", or "its". Replace "I" with real name of the author.
+- Skip opinions, judgments, and subjective descriptions. Only write factual claims.
+- If the chunk has no factual content (bare headings, link lists, filler), return {"facts": []}.
+- Every fact must include an "entities" list. Use [] if the fact names no entities.
+- Each entity needs a short canonical "name" and exactly one "type" from this list: ${allowedTypes}
+- Never use a type outside that list. If no type fits, leave the entity out.
+- When something could fit two types, pick one and use it consistently.
+- Respond with a single JSON object of this shape and nothing else, with no prose and no code fences: {"facts": [{"claimed": string, "entities": [{"name": string, "type": ${typeUnion}}]}]}`;
 
 export function extractionUserPrompt(chunkContent: string): string {
   return `Extract the facts from this chunk:\n\n${chunkContent}`;

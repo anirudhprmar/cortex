@@ -56,7 +56,7 @@ export const facts = pgTable(
     id: varchar("id", { length: 128 })
       .primaryKey()
       .$defaultFn(() => createId()),
-    claimedOp: text("claimedOp").notNull(),
+    claimed: text("claimed").notNull(),
     docId: varchar("docId", { length: 128 })
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),
@@ -97,7 +97,7 @@ export const entities = pgTable(
       .primaryKey()
       .$defaultFn(() => createId()),
     name: text("name").notNull(),
-    type: text("type", { enum: ["tool", "person", "concept"] }).notNull(),
+    type: text("type", { enum: ["tool", "person", "concept", "organization", "project", "place", "event","other"] }).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (t) => [unique("entities_name_type_uq").on(t.name, t.type)],

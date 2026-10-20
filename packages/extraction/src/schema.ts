@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const ENTITY_TYPES = ["tool", "person", "concept"] as const;
+export const ENTITY_TYPES = ["tool", "person", "concept", "organization", "project", "place", "event","other"] as const;
 
 export const entityTypeSchema = z.enum(ENTITY_TYPES);
 
@@ -10,7 +10,7 @@ export const extractedEntitySchema = z.object({
 });
 
 export const extractedFactSchema = z.object({
-  claim: z.string().min(1),
+  claimed: z.string().min(1),
   entities: z.array(extractedEntitySchema).default([]),
 });
 
