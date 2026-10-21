@@ -56,7 +56,7 @@ export const facts = pgTable(
     id: varchar("id", { length: 128 })
       .primaryKey()
       .$defaultFn(() => createId()),
-    claimed: text("claimed").notNull(),
+    claim: text("claim").notNull(),
     docId: varchar("docId", { length: 128 })
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),

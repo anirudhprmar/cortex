@@ -10,15 +10,16 @@ const TYPE_GUIDANCE: Record<EntityType, string> = {
     "companies, institutions, groups, or communities (e.g. OpenAI, Anthropic, Apache Foundation)",
   project:
     "named projects, repositories, products, or initiatives (e.g. cortex, React, Next.js)",
-  place: "locations, regions, countries, cities, or physical places (e.g. San Francisco, London)",
+  place:
+    "locations, regions, countries, cities, or physical places (e.g. San Francisco, London)",
   event:
     "meetings, conferences, releases, deadlines, or occurrences (e.g. NeurIPS 2025, Product Hunt launch)",
   other: "named entities that don't fit the above categories",
 };
 
-const allowedTypes = ENTITY_TYPES.map((t) => `- "${t}": ${TYPE_GUIDANCE[t]}`).join(
-  "\n",
-);
+const allowedTypes = ENTITY_TYPES.map(
+  (t) => `- "${t}": ${TYPE_GUIDANCE[t]}`,
+).join("\n");
 const typeUnion = ENTITY_TYPES.map((t) => `"${t}"`).join(" | ");
 
 export const extractionSystemPrompt = `You extract facts from a single chunk of a document written by the author (actual name of the author).
@@ -33,8 +34,15 @@ Rules:
 - Each entity needs a short canonical "name" and exactly one "type" from this list: ${allowedTypes}
 - Never use a type outside that list. If no type fits, leave the entity out.
 - When something could fit two types, pick one and use it consistently.
-- Respond with a single JSON object of this shape and nothing else, with no prose and no code fences: {"facts": [{"claimed": string, "entities": [{"name": string, "type": ${typeUnion}}]}]}`;
+- Respond with a single JSON object of this shape and nothing else, with no prose and no code fences: {"facts": [{"claim": string, "entities": [{"name": string, "type": ${typeUnion}}]}]}`;
 
-export function extractionUserPrompt(chunkContent: string): string {
-  return `Extract the facts from this chunk:\n\n${chunkContent}`;
+export function extractionUserPrompt(
+  chunkContent: string,
+  feedback?: string,
+): string {
+  const retryFeedback = feedback
+    ? `\n\nYour previous output was invalid. Fix these validation errors and return only valid JSON:\n${feedback}`
+    : "";
+
+  return `Extract the facts from this chunk:\n\n${chunkContent}${retryFeedback}`;
 }

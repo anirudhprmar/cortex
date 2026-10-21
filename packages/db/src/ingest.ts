@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db } from "./index";
-import { chunks, documents } from "./schema";
+import { chunks, documents, facts } from "./schema";
 import { insertDocSchema, type InsertDocProps } from "./documents";
 
 export type ChunkInput = {
@@ -61,6 +61,8 @@ export async function ingestDocument(
       throw new Error(`Failed to upsert document: ${doc.path}`);
     }
 
+    // Remove document facts before their referenced chunks are replaced.
+    await tx.delete(facts).where(eq(facts.docId, row.id));
     await tx.delete(chunks).where(eq(chunks.docId, row.id));
 
     if (chunkInputs.length > 0) {
