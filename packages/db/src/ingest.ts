@@ -15,6 +15,7 @@ export type IngestResult = {
   isNew: boolean;
   docId: string;
   chunkCount: number;
+  shouldEnqueue: boolean;
 };
 
 export async function ingestDocument(
@@ -25,7 +26,11 @@ export async function ingestDocument(
 
   return db.transaction(async (tx) => {
     const existing = await tx
-      .select({ id: documents.id, contentHash: documents.contentHash })
+      .select({
+        id: documents.id,
+        contentHash: documents.contentHash,
+        extractedHash: documents.extractedHash,
+      })
       .from(documents)
       .where(eq(documents.path, doc.path))
       .limit(1);
@@ -38,6 +43,7 @@ export async function ingestDocument(
         isNew: false,
         docId: existingDoc.id,
         chunkCount: 0,
+        shouldEnqueue: false,
       };
     }
 
@@ -55,7 +61,11 @@ export async function ingestDocument(
           updatedAt: new Date(),
         },
       })
-      .returning({ id: documents.id });
+      .returning({
+        id: documents.id,
+        extractedHash: documents.extractedHash,
+        contentHash: documents.contentHash,
+      });
 
     if (!row) {
       throw new Error(`Failed to upsert document: ${doc.path}`);
@@ -83,6 +93,7 @@ export async function ingestDocument(
       isNew: !existingDoc,
       docId: row.id,
       chunkCount: chunkInputs.length,
+      shouldEnqueue: row.contentHash !== row.extractedHash,
     };
   });
 }

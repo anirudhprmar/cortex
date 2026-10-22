@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "./index";
-import { chunks, entities, factEntities, facts } from "./schema";
+import { chunks, documents, entities, factEntities, facts } from "./schema";
 
 type EntityType = NonNullable<(typeof entities.$inferInsert)["type"]>;
 
@@ -20,8 +20,28 @@ export async function replaceDocumentFacts(
   scope: string,
   chunkFacts: ChunkFactsInput[],
   extractionModel: string,
-): Promise<void> {
-  await db.transaction(async (tx) => {
+  extractedHash: string,
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const [document] = await tx
+      .select({
+        contentHash: documents.contentHash,
+        extractedHash: documents.extractedHash,
+      })
+      .from(documents)
+      .where(eq(documents.id, docId))
+      .limit(1)
+      .for("update");
+
+    // A newer ingest may have landed while this extraction job was running.
+    if (
+      !document ||
+      document.contentHash !== extractedHash ||
+      document.extractedHash === extractedHash
+    ) {
+      return false;
+    }
+
     const docChunks = await tx
       .select({ id: chunks.id, ordinal: chunks.ordinal })
       .from(chunks)
@@ -95,5 +115,12 @@ export async function replaceDocumentFacts(
         }
       }
     }
+
+    await tx
+      .update(documents)
+      .set({ extractedHash })
+      .where(eq(documents.id, docId));
+
+    return true;
   });
 }

@@ -21,6 +21,7 @@ export const documents = pgTable("documents", {
   title: text("title"),
   content: text("content").notNull(),
   contentHash: text("contentHash").notNull(),
+  extractedHash:text('extractedHash'),
   modality: text("modality", { enum: ["markdown", "text"] })
     .notNull()
     .default("markdown"),

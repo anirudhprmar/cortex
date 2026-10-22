@@ -6,6 +6,7 @@ import { readFile as fsReadFile, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { ingestDocument } from "db";
 import { chunkMd } from "./chunking";
+import { publish } from "queue";
 
 const scopeSchema = z.enum(["work", "personal"]);
 
@@ -72,6 +73,12 @@ export async function readFiles(
       if (result.skipped) {
         console.log(`[SKIP] No changes detected: ${absPath}`);
         continue;
+      }
+      if (result.shouldEnqueue) {
+        await publish("document-extraction", {
+          docId: result.docId,
+          contentHash: currentHash,
+        });
       }
 
       const label = result.isNew ? "NEW" : "CHANGED";

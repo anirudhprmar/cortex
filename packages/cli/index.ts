@@ -64,6 +64,7 @@ program
           opts.scope,
           chunkFacts,
           "llama3.1:8b",
+          file.hash,
         );
       }
 
