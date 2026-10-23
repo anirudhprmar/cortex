@@ -1,6 +1,9 @@
 {
   "name": "queue",
-  "module": "index.ts",
+  "module": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "type": "module",
   "private": true,
   "devDependencies": {

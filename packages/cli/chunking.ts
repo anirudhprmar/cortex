@@ -30,10 +30,11 @@ export function chunkMd(markdownText: string, filePath:string): LocatedMarkdownC
   const finalizeChunk = () => {
     if (currentChunkNodes.length === 0) return;
 
-    const firstNode = currentChunkNodes[0];
-    const lastNode = currentChunkNodes[currentChunkNodes.length - 1];
-    const startLine = firstNode.position?.start.line ?? 1;
-    const lastLine = lastNode.position?.end.line ?? startLine;
+    const firstNode: RootContent | undefined = currentChunkNodes[0];
+    const lastNode: RootContent | undefined =
+      currentChunkNodes[currentChunkNodes.length - 1];
+    const startLine = firstNode?.position?.start.line ?? 1;
+    const lastLine = lastNode?.position?.end.line ?? startLine;
     
     const textContent = currentChunkNodes.map(node => toString(node)).join('\n').trim();
     
@@ -55,7 +56,10 @@ export function chunkMd(markdownText: string, filePath:string): LocatedMarkdownC
   }
 
   for (const node of tree.children) {
-    if (node.type === 'yaml' || node.type === 'toml') {
+    if (
+      node.type === 'yaml' ||
+      (node.type as string) === 'toml'
+    ) {
       continue;
     }
 

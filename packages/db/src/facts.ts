@@ -9,16 +9,19 @@ export type ExtractedFactInput = {
   entities: { name: string; type: EntityType }[];
 };
 
-export type ChunkFactsInput = {
-  ordinal: number;
+export type ExtractedChunkInput = {
+  headingPath: string[];
+  startLine: number;
+  endLine: number;
+  content: string;
   facts: ExtractedFactInput[];
 };
 
-/** Replace all extracted facts for a changed document atomically. */
+/** Replace all facts and chunks for a changed document atomically. */
 export async function replaceDocumentFacts(
   docId: string,
   scope: string,
-  chunkFacts: ChunkFactsInput[],
+  chunkInputs: ExtractedChunkInput[],
   extractionModel: string,
   extractedHash: string,
 ): Promise<boolean> {
@@ -42,31 +45,35 @@ export async function replaceDocumentFacts(
       return false;
     }
 
-    const docChunks = await tx
-      .select({ id: chunks.id, ordinal: chunks.ordinal })
-      .from(chunks)
-      .where(eq(chunks.docId, docId));
-    const chunkIds = new Map(
-      docChunks.map((chunk) => [chunk.ordinal, chunk.id]),
-    );
-
     await tx.delete(facts).where(eq(facts.docId, docId));
+    await tx.delete(chunks).where(eq(chunks.docId, docId));
 
-    for (const chunkResult of chunkFacts) {
-      const chunkId = chunkIds.get(chunkResult.ordinal);
-      if (!chunkId) {
+    for (const [ordinal, chunk] of chunkInputs.entries()) {
+      const [insertedChunk] = await tx
+        .insert(chunks)
+        .values({
+          docId,
+          ordinal,
+          headingPath: JSON.stringify(chunk.headingPath),
+          startLine: chunk.startLine,
+          endLine: chunk.endLine,
+          content: chunk.content,
+        })
+        .returning({ id: chunks.id });
+
+      if (!insertedChunk) {
         throw new Error(
-          `Missing database chunk ${chunkResult.ordinal} for document ${docId}`,
+          `Failed to insert chunk ${ordinal} for document ${docId}`,
         );
       }
 
-      for (const fact of chunkResult.facts) {
+      for (const fact of chunk.facts) {
         const [insertedFact] = await tx
           .insert(facts)
           .values({
             claim: fact.claim,
             docId,
-            chunkId,
+            chunkId: insertedChunk.id,
             scope,
             extractionModel,
           })

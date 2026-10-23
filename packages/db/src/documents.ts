@@ -16,6 +16,22 @@ export async function getExistingDocFromDb(absPath: string) {
   return rows[0] ?? null;
 }
 
+export async function getDocumentById(id: string) {
+  const rows = await db
+    .select({
+      id: documents.id,
+      path: documents.path,
+      content: documents.content,
+      contentHash: documents.contentHash,
+      scope: documents.scope,
+    })
+    .from(documents)
+    .where(eq(documents.id, id))
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
 export const insertDocSchema = z.object({
   path: z.string().min(1),
   title: z.string().optional(),
