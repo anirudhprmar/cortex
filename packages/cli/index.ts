@@ -1,7 +1,8 @@
 import { Command } from "commander";
+import { hostname } from "node:os";
 import { resolvePath } from "./path-resolve";
 import { readFiles } from "./readfile";
-import { consume } from "queue";
+import { consume, listProcessedJobs } from "queue";
 import { handleExtractionJob, outcomes } from "./worker";
 
 const program = new Command();
@@ -34,17 +35,41 @@ program
   });
 
 program
+  .command("status")
+  .description("List finished extraction jobs (acked recently, 7 day window)")
+  .action(async () => {
+    const jobs = await listProcessedJobs("document-extraction", "extraction");
+    const entries = Object.entries(jobs);
+    if (entries.length === 0) {
+      console.log("No processed jobs recorded.");
+      return;
+    }
+    for (const [jobId, info] of entries) {
+      const { consumer, completedAt } = JSON.parse(info);
+      console.log(`${jobId}  consumer=${consumer}  completedAt=${completedAt}`);
+    }
+  });
+
+program
   .command("work")
   .description("Consume document-extraction jobs until interrupted")
-  .action(async () => {
+  .option(
+    "-n, --name <name>",
+    "stable consumer name so restarts recover their own pending jobs",
+    process.env.WORKER_NAME ?? hostname(),
+  )
+  .action(async (opts) => {
     const controller = new AbortController();
     const shutdown = () => controller.abort();
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
 
+    console.log(`[worker] ${opts.name} consuming document-extraction (Ctrl+C to stop)`);
+
     try {
       await consume("document-extraction", "extraction", handleExtractionJob, {
         signal: controller.signal,
+        consumerName: opts.name,
       });
     } finally {
       process.off("SIGINT", shutdown);

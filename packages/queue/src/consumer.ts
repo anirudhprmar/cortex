@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { redis } from './client'
 import { arrayToObject } from './fields'
+import { markJobProcessed } from './status'
 import type { ConsumerGroupName, ConsumerName, JobHandler, StreamName } from './types'
 
 type StreamEntry = [id: string, fields: string[]]
@@ -40,6 +41,7 @@ export async function consume(
     try {
       await handler(id, payload)
       await redis.xack(stream, group, id)
+      await markJobProcessed(stream, group, id, consumerName)
     } catch (err) {
       console.error(`Handler failed for ${id}:`, err)
       // deliberately not acking — stays in the PEL so it can be retried/reclaimed later

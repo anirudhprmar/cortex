@@ -2,6 +2,7 @@ export { redis } from './client'
 export { publish } from './producer'
 export { consume } from './consumer'
 export { reclaim } from './reclaim'
+export { markJobProcessed, listProcessedJobs } from './status'
 export type {
   StreamName,
   ConsumerGroupName,
