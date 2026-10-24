@@ -1,4 +1,5 @@
 import { createId } from "@paralleldrive/cuid2";
+import { sql } from "drizzle-orm";
 import {
   index,
   jsonb,
@@ -82,6 +83,10 @@ export const facts = pgTable(
       .notNull(),
   },
   (t) => [
+    index("facts_claim_fts_idx").using(
+      "gin",
+      sql`to_tsvector('english', ${t.claim})`,
+    ),
     index("facts_embedding_hnsw_idx").using(
       "hnsw",
       t.embedding.op("vector_cosine_ops"),
@@ -159,3 +164,4 @@ export const projects = pgTable(
   },
   (t) => [index("project_name_idx").on(t.name)],
 );
+
