@@ -4,6 +4,7 @@ import { resolvePath } from "./path-resolve";
 import { readFiles } from "./readfile";
 import { consume, listProcessedJobs } from "queue";
 import { handleExtractionJob, outcomes } from "./worker";
+import { entityProfile } from "core";
 
 const program = new Command();
 
@@ -31,6 +32,51 @@ program
     } catch (err) {
       console.error((err as Error).message);
       process.exit(1);
+    }
+  });
+
+program
+  .command("profile")
+  .description("Look up an entity and the facts about it")
+  .argument("<name>", "entity name to look up")
+  .option("-s, --scope <name>", "profile facts scoped to a scope")
+  .action(async (nameArg, opts) => {
+    try {
+      const result = await entityProfile({
+        name: nameArg,
+        ...(opts.scope ? { scope: opts.scope } : {}),
+      });
+
+      if (result.status === "notFound") {
+        console.log(`No entity named "${nameArg}".`);
+        return;
+      }
+
+      if (result.status === "ambiguous") {
+        console.log(`"${nameArg}" matches multiple entities:`);
+        result.entities.forEach((e, i) => {
+          console.log(`  ${i + 1}. ${e.name} (${e.type})`);
+        });
+        return;
+      }
+
+      console.log(`${result.entity.name} — ${result.entity.type}`);
+      if (result.facts.length === 0) {
+        console.log("No facts recorded for this entity yet.");
+        return;
+      }
+      for (const fact of result.facts) {
+        console.log(
+          `  • ${fact.claim}  [${fact.docPath}:${fact.startLine}-${fact.endLine}]`,
+        );
+      }
+    } catch (err) {
+      console.error((err as Error).message);
+      process.exitCode = 1;
+    } finally {
+      // The queue/database clients (imported eagerly at module top) keep
+      // their connections alive, preventing the process from exiting.
+      process.exit(process.exitCode ?? 0);
     }
   });
 

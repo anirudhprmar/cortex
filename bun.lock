@@ -57,6 +57,7 @@
       "name": "cli",
       "dependencies": {
         "commander": "^15.0.0",
+        "core": "workspace:*",
         "db": "workspace:*",
         "extraction": "workspace:*",
         "gray-matter": "^4.0.3",
