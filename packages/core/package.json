@@ -10,8 +10,10 @@
     "typescript": "^7"
   },
   "dependencies": {
+    "ai": "^7.0.154",
     "db": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "ollama-ai-provider-v2": "^4.1.0",
     "zod": "^4.6.6"
   }
 }
