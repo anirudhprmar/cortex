@@ -71,7 +71,7 @@ export async function readFiles(
       );
 
       if (result.skipped) {
-        console.log(`[SKIP] No changes detected: ${absPath}`);
+        console.error(`[SKIP] No changes detected: ${absPath}`);
         continue;
       }
       if (result.shouldEnqueue) {
@@ -83,7 +83,7 @@ export async function readFiles(
 
       const label = result.isNew ? "NEW" : "CHANGED";
       const verb = result.isNew ? "Added" : "Updated";
-      console.log(
+      console.error(
         `[${label}] ${verb} document: ${absPath} (id: ${result.docId}, chunks: ${result.chunkCount})`,
       );
 

@@ -33,12 +33,12 @@ export async function handleExtractionJob(
 
   const doc = await getDocumentById(docId);
   if (!doc) {
-    console.log(`[SKIP] Document ${docId} no longer exists (job ${jobId})`);
+    console.error(`[SKIP] Document ${docId} no longer exists (job ${jobId})`);
     return;
   }
 
   if (doc.contentHash !== contentHash) {
-    console.log(
+    console.error(
       `[SKIP] Stale job ${jobId} for document ${docId}: a newer content version exists`,
     );
     return;
@@ -114,7 +114,7 @@ export async function handleEmbeddingJob(
   }
 
   const result = await embedFactsForDocument(docId);
-  console.log(
+  console.error(
     `[embedding] document ${docId}: ${result.embedded}/${result.pending} fact(s) embedded`,
   );
 }

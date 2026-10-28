@@ -98,7 +98,7 @@ export async function backfillFactEmbeddings(): Promise<EmbedBackfillResult> {
       );
 
       embedded += batch.length;
-      console.log(`[embedding] ${embedded}/${pending} embedded so far`);
+      console.error(`[embedding] ${embedded}/${pending} embedded so far`);
     } catch (err) {
       failed += batch.length;
       console.error(
