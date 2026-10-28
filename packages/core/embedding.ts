@@ -1,5 +1,5 @@
 import z from "zod";
-import { eq, isNull } from "drizzle-orm";
+import { and, asc, count, eq, gt, isNull, type SQL } from "drizzle-orm";
 import { embedMany } from "ai";
 import { ollama } from "ollama-ai-provider-v2";
 import { db, facts } from "db";
@@ -40,37 +40,67 @@ export async function embedClaims(
 
 const EMBED_BATCH_SIZE = 32;
 
-export async function backfillFactEmbeddings(): Promise<number> {
-  let total = 0;
+export type EmbedBackfillResult = {
+  /** Facts without an embedding when the pass started. */
+  pending: number;
+  embedded: number;
+  failed: number;
+};
+
+export async function backfillFactEmbeddings(): Promise<EmbedBackfillResult> {
+  const [pendingRow] = await db
+    .select({ value: count() })
+    .from(facts)
+    .where(isNull(facts.embedding));
+  const pending = pendingRow?.value ?? 0;
+  if (pending === 0) return { pending, embedded: 0, failed: 0 };
+
+  let embedded = 0;
+  let failed = 0;
+  // Keyset pagination: a failed batch must not loop forever, so each
+  // page is anchored after the previous one regardless of success.
+  let lastId: string | null = null;
 
   for (;;) {
-    const pending = await db
+    const page: SQL[] = [isNull(facts.embedding)];
+    if (lastId) page.push(gt(facts.id, lastId));
+
+    const batch = await db
       .select({ id: facts.id, claim: facts.claim })
       .from(facts)
-      .where(isNull(facts.embedding))
+      .where(and(...page))
+      .orderBy(asc(facts.id))
       .limit(EMBED_BATCH_SIZE);
-    if (pending.length === 0) break;
+    if (batch.length === 0) break;
+    lastId = batch[batch.length - 1]!.id;
 
-    const embeddings = await embedClaims(
-      pending.map((p) => p.claim),
-      "doc",
-    );
+    try {
+      const embeddings = await embedClaims(
+        batch.map((p) => p.claim),
+        "doc",
+      );
 
-    await Promise.all(
-      pending.map((p, i) =>
-        db
-          .update(facts)
-          .set({
-            embedding: embeddings[i],
-            embeddingModel: EMBEDDING_MODEL,
-          })
-          .where(eq(facts.id, p.id)),
-      ),
-    );
+      await Promise.all(
+        batch.map((p, i) =>
+          db
+            .update(facts)
+            .set({
+              embedding: embeddings[i],
+              embeddingModel: EMBEDDING_MODEL,
+            })
+            .where(eq(facts.id, p.id)),
+        ),
+      );
 
-    total += pending.length;
-    console.log(`[embedding] embedded ${total} fact(s)`);
+      embedded += batch.length;
+      console.log(`[embedding] ${embedded}/${pending} embedded so far`);
+    } catch (err) {
+      failed += batch.length;
+      console.error(
+        `[embedding] failed to embed ${batch.length} fact(s): ${(err as Error).message}`,
+      );
+    }
   }
 
-  return total;
+  return { pending, embedded, failed };
 }

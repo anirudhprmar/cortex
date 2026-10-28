@@ -5,6 +5,7 @@ import { readFiles } from "./readfile";
 import { consume, listProcessedJobs } from "queue";
 import { handleExtractionJob, outcomes } from "./worker";
 import { entityProfile } from "core";
+import { backfillFactEmbeddings } from "core";
 
 const program = new Command();
 
@@ -76,6 +77,24 @@ program
     } finally {
       // The queue/database clients (imported eagerly at module top) keep
       // their connections alive, preventing the process from exiting.
+      process.exit(process.exitCode ?? 0);
+    }
+  });
+
+program
+  .command("embed")
+  .description("Embed facts that don't have a vector yet")
+  .action(async () => {
+    try {
+      const result = await backfillFactEmbeddings();
+      console.log(
+        `Pending: ${result.pending}, embedded: ${result.embedded}, failed: ${result.failed}`,
+      );
+      if (result.failed > 0) process.exitCode = 1;
+    } catch (err) {
+      console.error((err as Error).message);
+      process.exitCode = 1;
+    } finally {
       process.exit(process.exitCode ?? 0);
     }
   });
