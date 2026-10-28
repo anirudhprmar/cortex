@@ -1,6 +1,8 @@
 import type { JobPayload } from "queue";
+import { publish } from "queue";
 import { getDocumentById, replaceDocumentFacts } from "db";
 import { extractMemories } from "extraction";
+import { embedFactsForDocument } from "core";
 import { chunkMd } from "./chunking";
 
 const EXTRACTION_MODEL = "llama3.1:8b";
@@ -89,5 +91,30 @@ export async function handleExtractionJob(
     chunkInputs,
     EXTRACTION_MODEL,
     contentHash,
+  );
+
+  // Extraction committed; queue the embedding pass for this document's
+  // new facts so vectors fill in without a global scan.
+  await publish("fact-embedding", { docId });
+}
+
+/**
+ * Process one fact-embedding job: embed the document's facts that don't
+ * have a vector yet. Throws on failure so the job stays pending and is
+ * retried by the consumer/reclaimer.
+ */
+export async function handleEmbeddingJob(
+  jobId: string,
+  payload: JobPayload,
+): Promise<void> {
+  const docId = payload.docId;
+  if (!docId) {
+    console.error(`[SKIP] Job ${jobId} missing docId field:`, payload);
+    return;
+  }
+
+  const result = await embedFactsForDocument(docId);
+  console.log(
+    `[embedding] document ${docId}: ${result.embedded}/${result.pending} fact(s) embedded`,
   );
 }

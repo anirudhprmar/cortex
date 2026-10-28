@@ -40,6 +40,11 @@ export async function embedClaims(
 
 const EMBED_BATCH_SIZE = 32;
 
+export type EmbedResult = {
+  pending: number;
+  embedded: number;
+};
+
 export type EmbedBackfillResult = {
   /** Facts without an embedding when the pass started. */
   pending: number;
@@ -103,4 +108,37 @@ export async function backfillFactEmbeddings(): Promise<EmbedBackfillResult> {
   }
 
   return { pending, embedded, failed };
+}
+
+/**
+ * Embed the claims of one document's facts that don't have a vector yet.
+ * Throws on failure so the queue job stays pending and is retried.
+ */
+export async function embedFactsForDocument(
+  docId: string,
+): Promise<EmbedResult> {
+  const pendingRows = await db
+    .select({ id: facts.id, claim: facts.claim })
+    .from(facts)
+    .where(and(eq(facts.docId, docId), isNull(facts.embedding)));
+  if (pendingRows.length === 0) return { pending: 0, embedded: 0 };
+
+  const embeddings = await embedClaims(
+    pendingRows.map((p) => p.claim),
+    "doc",
+  );
+
+  await Promise.all(
+    pendingRows.map((p, i) =>
+      db
+        .update(facts)
+        .set({
+          embedding: embeddings[i],
+          embeddingModel: EMBEDDING_MODEL,
+        })
+        .where(eq(facts.id, p.id)),
+    ),
+  );
+
+  return { pending: pendingRows.length, embedded: pendingRows.length };
 }

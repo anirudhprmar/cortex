@@ -3,7 +3,7 @@ import { hostname } from "node:os";
 import { resolvePath } from "./path-resolve";
 import { readFiles } from "./readfile";
 import { consume, listProcessedJobs } from "queue";
-import { handleExtractionJob, outcomes } from "./worker";
+import { handleEmbeddingJob, handleExtractionJob, outcomes } from "./worker";
 import { entityProfile } from "core";
 import { backfillFactEmbeddings } from "core";
 
@@ -132,10 +132,16 @@ program
     console.log(`[worker] ${opts.name} consuming document-extraction (Ctrl+C to stop)`);
 
     try {
-      await consume("document-extraction", "extraction", handleExtractionJob, {
-        signal: controller.signal,
-        consumerName: opts.name,
-      });
+      await Promise.all([
+        consume("document-extraction", "extraction", handleExtractionJob, {
+          signal: controller.signal,
+          consumerName: opts.name,
+        }),
+        consume("fact-embedding", "embedding", handleEmbeddingJob, {
+          signal: controller.signal,
+          consumerName: opts.name,
+        }),
+      ]);
     } finally {
       process.off("SIGINT", shutdown);
       process.off("SIGTERM", shutdown);
