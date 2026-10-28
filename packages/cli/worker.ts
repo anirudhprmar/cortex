@@ -1,5 +1,4 @@
 import type { JobPayload } from "queue";
-import { publish } from "queue";
 import { getDocumentById, replaceDocumentFacts } from "db";
 import { extractMemories } from "extraction";
 import { embedFactsForDocument } from "core";
@@ -95,6 +94,7 @@ export async function handleExtractionJob(
 
   // Extraction committed; queue the embedding pass for this document's
   // new facts so vectors fill in without a global scan.
+  const { publish } = await import("queue");
   await publish("fact-embedding", { docId });
 }
 

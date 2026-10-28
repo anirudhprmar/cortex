@@ -6,7 +6,6 @@ import { readFile as fsReadFile, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { ingestDocument } from "db";
 import { chunkMd } from "./chunking";
-import { publish } from "queue";
 
 const scopeSchema = z.enum(["work", "personal"]);
 
@@ -75,6 +74,7 @@ export async function readFiles(
         continue;
       }
       if (result.shouldEnqueue) {
+        const { publish } = await import("queue");
         await publish("document-extraction", {
           docId: result.docId,
           contentHash: currentHash,

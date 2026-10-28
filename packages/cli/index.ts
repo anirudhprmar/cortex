@@ -2,9 +2,8 @@ import { Command } from "commander";
 import { hostname } from "node:os";
 import { resolvePath } from "./path-resolve";
 import { readFiles } from "./readfile";
-import { consume, listProcessedJobs } from "queue";
 import { handleEmbeddingJob, handleExtractionJob, outcomes } from "./worker";
-import { entityProfile } from "core";
+import { entityProfile, keywordSearch } from "core";
 import { backfillFactEmbeddings } from "core";
 
 const program = new Command();
@@ -58,6 +57,51 @@ program
           console.log(
             `Ingested ${files.length} document(s) (${totalChunks} chunk(s)) from ${abs} [scope: ${opts.scope}] — extraction queued`,
           ),
+        opts.json,
+      );
+    } catch (err) {
+      console.error((err as Error).message);
+      process.exitCode = 1;
+    } finally {
+      exitNow();
+    }
+  });
+
+program
+  .command("search")
+  .description("Full-text keyword search over fact claims")
+  .argument("<query>", "search terms to match against fact claims")
+  .option("-s, --scope <name>", "restrict search to a scope")
+  .option("-n, --limit <count>", "maximum results to return", "20")
+  .option("--json", "print the search results as JSON")
+  .action(async (queryArg, opts) => {
+    try {
+      const limit = Number.parseInt(opts.limit, 10);
+      if (!Number.isInteger(limit) || limit <= 0) {
+        throw new Error(`Invalid --limit: ${opts.limit}`);
+      }
+
+      const results = await keywordSearch(queryArg, {
+        ...(opts.scope ? { scopes: [opts.scope] } : {}),
+        limit,
+      });
+
+      emit(
+        { query: queryArg, count: results.length, results },
+        () => {
+          if (results.length === 0) {
+            console.log(`No facts matching "${queryArg}".`);
+            return;
+          }
+          for (const fact of results) {
+            console.log(
+              `  • ${fact.claim}  [${fact.docPath}:${fact.startLine}-${fact.endLine}]`,
+            );
+            if (fact.entityNames.length > 0) {
+              console.log(`entities: ${fact.entityNames.join(", ")}`);
+            }
+          }
+        },
         opts.json,
       );
     } catch (err) {
@@ -148,6 +192,7 @@ program
   .option("--json", "print processed jobs as JSON")
   .action(async (opts) => {
     try {
+      const { listProcessedJobs } = await import("queue");
       const jobs = await listProcessedJobs("document-extraction", "extraction");
       const entries = Object.entries(jobs).map(([jobId, info]) => {
         const { consumer, completedAt } = JSON.parse(info);
@@ -194,6 +239,7 @@ program
     console.error(`[worker] ${opts.name} consuming document-extraction (Ctrl+C to stop)`);
 
     try {
+      const { consume } = await import("queue");
       await Promise.all([
         consume("document-extraction", "extraction", handleExtractionJob, {
           signal: controller.signal,
