@@ -1,0 +1,24 @@
+{
+  "name": "mcp",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "cortex-mcp": "./src/stdio.ts"
+  },
+  "scripts": {
+    "mcp:stdio": "bun src/stdio.ts",
+    "test": "bun --env-file=../../.env test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^7"
+  },
+  "dependencies": {
+    "core": "workspace:*",
+    "db": "workspace:*",
+    "queue": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  }
+}
