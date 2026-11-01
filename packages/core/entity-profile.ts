@@ -4,7 +4,9 @@ import { chunks, db, documents, entities, factEntities, facts } from 'db';
 
 export const profileOptionsSchema = z.object({
   name: z.string(),
-  scope:z.string().optional()
+  scope: z.string().optional(),
+  // null = user-level facts only, string = project-level facts only. Omit to include both.
+  projectKey: z.string().nullish()
 })
 
 export type ProfileOptions = z.infer<typeof profileOptionsSchema>;
@@ -23,6 +25,7 @@ export type EntityFact = {
   endLine: number;
   headingPath: string[];
   scope: string;
+  projectKey: string | null;
 };
 
 export type ProfileResult = 
@@ -31,7 +34,7 @@ export type ProfileResult =
   | { status: "found"; entity: EntitySummary; facts: EntityFact[] }
 
 export async function entityProfile(options: ProfileOptions): Promise<ProfileResult> {
-  const { name, scope } = options;
+  const { name, scope, projectKey } = options;
   const trimmedName = name.trim();
 
   const matches = await db
@@ -59,12 +62,18 @@ export async function entityProfile(options: ProfileOptions): Promise<ProfileRes
     isNull(facts.supersededBy)
   ]
   if (scope) conditions.push(eq(facts.scope, scope));
+  if (projectKey !== undefined) {
+    conditions.push(
+      projectKey === null ? isNull(facts.projectKey) : eq(facts.projectKey, projectKey),
+    );
+  }
   
   const rows = await db
     .select({
       factId: facts.id,
       claim: facts.claim,
       scope: facts.scope,
+      projectKey: facts.projectKey,
       docPath: documents.path,
       startLine: chunks.startLine,
       endLine: chunks.endLine,

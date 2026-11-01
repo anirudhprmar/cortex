@@ -24,6 +24,7 @@ export async function getDocumentById(id: string) {
       content: documents.content,
       contentHash: documents.contentHash,
       scope: documents.scope,
+      projectKey: documents.projectKey,
     })
     .from(documents)
     .where(eq(documents.id, id))
@@ -39,6 +40,8 @@ export const insertDocSchema = z.object({
   contentHash: z.string().length(64),
   modality: z.enum(["markdown", "text"]).default("markdown"),
   scope: z.enum(["work", "personal"]).default("personal"),
+  // null = user-level memory; set = project-level memory (root path)
+  projectKey: z.string().nullish()
 });
 
 export const updateDocSchema = z.object({
@@ -46,7 +49,8 @@ export const updateDocSchema = z.object({
   content: z.string().optional(),
   contentHash: z.string().length(64).optional(),
   modality: z.enum(["markdown", "text"]).optional(),
-  scope: z.enum(["work", "personal"]).optional()
+  scope: z.enum(["work", "personal"]).optional(),
+  projectKey: z.string().nullish()
 })
 
 export type InsertDocProps = z.infer<typeof insertDocSchema>;

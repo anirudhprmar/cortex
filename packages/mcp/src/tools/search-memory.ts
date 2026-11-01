@@ -14,11 +14,15 @@ export function register(server: McpServer) {
           .array(z.string())
           .optional()
           .describe("Scopes to search. Omit to search all scopes"),
+        projectKey: z
+          .string()
+          .nullish()
+          .describe("Memory level filter. Omit to search both levels; null = user-level only; a root path = facts from that project only"),
         limit: z.number().default(10).describe("Max results"),
       }),
     },
-    async ({ query, scopes, limit }) => {
-      const results = await core.keywordSearch(query, { scopes, limit });
+    async ({ query, scopes, projectKey, limit }) => {
+      const results = await core.keywordSearch(query, { scopes, projectKey, limit });
       return { content: [{ type: "text", text: JSON.stringify(results) }] };
     }
   );

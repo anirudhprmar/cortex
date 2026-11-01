@@ -10,12 +10,15 @@ export type SearchResult = {
   endLine: number;
   headingPath: string[];
   scope: string;
+  projectKey: string | null;
   rank: number;
 };
 
 export type SearchOptions = {
   /** Scopes to search. Omit to search all scopes. */
   scopes?: string[];
+  /** Memory level filter. null = user-level facts only, string = project-level facts only. Omit to search both. */
+  projectKey?: string | null;
   /** Whether to include facts that have been superseded. Defaults to false. */
   includeSuperseded?: boolean;
   limit?: number;
@@ -28,6 +31,7 @@ export async function keywordSearch(
 ): Promise<SearchResult[]> {
   const {
     scopes,
+    projectKey,
     includeSuperseded = false,
     limit = 20,
     offset = 0,
@@ -46,12 +50,18 @@ export async function keywordSearch(
 
   if (!includeSuperseded) conditions.push(isNull(facts.supersededBy));
   if (scopes) conditions.push(inArray(facts.scope, scopes));
+  if (projectKey !== undefined) {
+    conditions.push(
+      projectKey === null ? isNull(facts.projectKey) : eq(facts.projectKey, projectKey),
+    );
+  }
 
   const rows = await db
     .select({
       factId: facts.id,
       claim: facts.claim,
       scope: facts.scope,
+      projectKey: facts.projectKey,
       rank: rankExpr,
       docPath: documents.path,
       startLine: chunks.startLine,

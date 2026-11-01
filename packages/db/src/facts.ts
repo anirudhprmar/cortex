@@ -21,6 +21,7 @@ export type ExtractedChunkInput = {
 export async function replaceDocumentFacts(
   docId: string,
   scope: string,
+  projectKey: string | null,
   chunkInputs: ExtractedChunkInput[],
   extractionModel: string,
   extractedHash: string,
@@ -75,6 +76,7 @@ export async function replaceDocumentFacts(
             docId,
             chunkId: insertedChunk.id,
             scope,
+            projectKey,
             extractionModel,
           })
           .returning({ id: facts.id });

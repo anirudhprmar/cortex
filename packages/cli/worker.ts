@@ -87,6 +87,7 @@ export async function handleExtractionJob(
   await replaceDocumentFacts(
     docId,
     doc.scope,
+    doc.projectKey ?? null,
     chunkInputs,
     EXTRACTION_MODEL,
     contentHash,

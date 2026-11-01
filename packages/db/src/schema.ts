@@ -27,6 +27,7 @@ export const documents = pgTable("documents", {
     .notNull()
     .default("markdown"),
   scope: text("scope").notNull().default("personal"),
+  projectKey: text("projectKey"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .$defaultFn(() => new Date())
@@ -66,6 +67,7 @@ export const facts = pgTable(
       .notNull()
       .references(() => chunks.id, { onDelete: "set null" }),
     scope: text("scope").notNull(),
+    projectKey: text("projectKey"), // null if a user fact and root path if a project fact
     observedAt: timestamp("observedAt"),
     validFrom: timestamp("validFrom"),
     validTo: timestamp("validTo"),

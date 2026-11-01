@@ -8,11 +8,6 @@ import { backfillFactEmbeddings } from "core";
 
 const program = new Command();
 
-/**
- * One result, two renderers: --json prints the payload alone on stdout so
- * scripts can parse it; the default prints the human-readable rendering.
- * Progress and diagnostics always go to stderr, never stdout.
- */
 function emit(payload: unknown, human: () => void, json?: boolean) {
   if (json) {
     console.log(JSON.stringify(payload, null, 2));
@@ -21,8 +16,6 @@ function emit(payload: unknown, human: () => void, json?: boolean) {
   }
 }
 
-/** One-shot commands exit explicitly: the queue/database clients keep their
- * connections open and would otherwise hang the process after printing. */
 function exitNow() {
   process.exit(process.exitCode ?? 0);
 }
@@ -39,12 +32,17 @@ program
     "-s, --scope <name>",
     "type of note personal or work related",
     "personal",
-  )
+)
+  .option(
+    "-p, --project <rootPath>",
+    "high level type of memory: user level or project level",
+    ""
+)
   .option("--json", "print the ingest result as JSON")
   .action(async (pathArg, opts) => {
     try {
       const abs = resolvePath(pathArg);
-      const files = await readFiles(abs, opts.scope);
+      const files = await readFiles(abs, opts.scope, opts.project);
       const documents = files.map((f) => ({
         path: f.path,
         docId: f.docId,
@@ -72,6 +70,10 @@ program
   .description("Full-text keyword search over fact claims")
   .argument("<query>", "search terms to match against fact claims")
   .option("-s, --scope <name>", "restrict search to a scope")
+  .option(
+    "-p, --project <rootPath>",
+    "restrict to project-level facts from this project root path (omit for both levels)",
+  )
   .option("-n, --limit <count>", "maximum results to return", "20")
   .option("--json", "print the search results as JSON")
   .action(async (queryArg, opts) => {
@@ -83,6 +85,7 @@ program
 
       const results = await keywordSearch(queryArg, {
         ...(opts.scope ? { scopes: [opts.scope] } : {}),
+        ...(opts.project ? { projectKey: opts.project } : {}),
         limit,
       });
 
@@ -117,12 +120,17 @@ program
   .description("Look up an entity and the facts about it")
   .argument("<name>", "entity name to look up")
   .option("-s, --scope <name>", "profile facts scoped to a scope")
+  .option(
+    "-p, --project <rootPath>",
+    "profile project-level facts from this project root path (omit for both levels)",
+  )
   .option("--json", "print the profile result as JSON")
   .action(async (nameArg, opts) => {
     try {
       const result = await entityProfile({
         name: nameArg,
         ...(opts.scope ? { scope: opts.scope } : {}),
+        ...(opts.project ? { projectKey: opts.project } : {}),
       });
 
       emit(

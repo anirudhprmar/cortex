@@ -30,9 +30,13 @@ export function register(server: McpServer) {
           .optional()
           .describe("Storage path. Documents with the same path are deduplicated by content hash"),
         scope: scopeSchema.default("personal").describe("Memory scope"),
+        projectKey: z
+          .string()
+          .nullish()
+          .describe("Storage path. null (default) or omitted = user-level memory; a root path = project-level memory"),
       }),
     },
-    async ({ content, title, path, scope }) => {
+    async ({ content, title, path, scope, projectKey }) => {
       const docPath = path ?? `mcp/${slugify(title ?? "note")}.md`;
       const contentHash = createHash("sha256").update(content).digest("hex");
       const fileChunks = chunkMd(content, docPath);
@@ -45,6 +49,7 @@ export function register(server: McpServer) {
           contentHash,
           modality: "markdown",
           scope,
+          projectKey: projectKey ?? null,
         },
         fileChunks.map((chunk) => ({
           headingPath: chunk.locator.headingPath,

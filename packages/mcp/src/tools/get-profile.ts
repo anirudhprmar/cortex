@@ -14,11 +14,15 @@ export function register(server: McpServer) {
           .string()
           .optional()
           .describe("Scopes to search. Omit to search all scopes"),
+        projectKey: z
+          .string()
+          .nullish()
+          .describe("Memory level filter. Omit to include both levels; null = user-level only; a root path = that project only"),
         limit: z.number().default(10).describe("Max results"),
       }),
     },
-    async ({ name, scope }) => {
-      const results = await core.entityProfile({name,scope})
+    async ({ name, scope, projectKey }) => {
+      const results = await core.entityProfile({ name, scope, projectKey })
       return { content: [{ type: "text", text: JSON.stringify(results) }] };
     }
   );

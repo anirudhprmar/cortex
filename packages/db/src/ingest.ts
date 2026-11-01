@@ -30,6 +30,7 @@ export async function ingestDocument(
         id: documents.id,
         contentHash: documents.contentHash,
         extractedHash: documents.extractedHash,
+        projectKey: documents.projectKey,
       })
       .from(documents)
       .where(eq(documents.path, doc.path))
@@ -38,6 +39,16 @@ export async function ingestDocument(
     const existingDoc = existing[0];
 
     if (existingDoc && existingDoc.contentHash === doc.contentHash) {
+      // Content unchanged, but the project level may have moved. Re-label the
+      // already-extracted facts in this same transaction so a fact never
+      // points to a project its document no longer belongs to.
+      if ((existingDoc.projectKey ?? null) !== (doc.projectKey ?? null)) {
+        await tx
+          .update(facts)
+          .set({ projectKey: doc.projectKey ?? null })
+          .where(eq(facts.docId, existingDoc.id));
+      }
+
       return {
         skipped: true,
         isNew: false,
@@ -58,6 +69,7 @@ export async function ingestDocument(
           contentHash: doc.contentHash,
           modality: doc.modality,
           scope: doc.scope,
+          projectKey: doc.projectKey,
           updatedAt: new Date(),
         },
       })

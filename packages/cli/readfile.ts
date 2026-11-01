@@ -37,8 +37,12 @@ function toDocFields(absPath: string, rawContent: string) {
 export async function readFiles(
   dirPath: string,
   scope = "personal",
+  projectKey: string | null = null,
 ): Promise<ProcessedFile[]> {
   const docScope = scopeSchema.parse(scope);
+  // Empty string (CLI default) means user-level memory, stored as null
+  const docProjectKey =
+    projectKey && projectKey.trim().length > 0 ? projectKey.trim() : null;
   const stats = await stat(dirPath);
   const filePaths = stats.isFile() ? [dirPath] : await getValidFiles(dirPath);
   const processedFiles: ProcessedFile[] = [];
@@ -60,6 +64,7 @@ export async function readFiles(
           contentHash: currentHash,
           modality: fields.modality,
           scope: docScope,
+          projectKey: docProjectKey
         },
         fileChunks.map((chunk) => ({
           headingPath: chunk.locator.headingPath,
