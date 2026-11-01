@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "cortex": {
+      "type": "local",
+      "command": ["bun", "run", "packages/mcp/src/stdio.ts"],
+      "enabled": true,
+      "environment": {}
+    }
+  }
+}
