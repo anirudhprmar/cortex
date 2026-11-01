@@ -23,10 +23,13 @@ describe("cortex mcp", () => {
     expect(content.text).toContain("bun");
   });
 
-  it("search_memory is registered", async () => {
+  it("expected tools are registered", async () => {
     const client = await makeClient();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toContain("search_memory");
+    expect(tools.map((t) => t.name)).toContain("get_profile");
+    expect(tools.map((t) => t.name)).toContain("list_entities");
+    expect(tools.map((t) => t.name)).toContain("add_document");
   });
 
   it("search_memory returns results", async () => {

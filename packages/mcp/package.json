@@ -8,7 +8,7 @@
   },
   "scripts": {
     "mcp:stdio": "bun src/stdio.ts",
-    "test": "bun --env-file=../../.env test"
+    "test": "bun --env-file=../../.env test tests/"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "core": "workspace:*",
+    "cli": "workspace:*",
     "db": "workspace:*",
     "queue": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.32.2",
