@@ -149,6 +149,25 @@ export const factLinks = pgTable(
   ],
 );
 
+export const memoryProposals = pgTable(
+  "memoryProposals",
+  {
+    id: varchar("id", { length: 128 })
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    memory: text("memory").notNull(),
+    level: text("level", { enum: ["user", "project"] }).notNull(),
+    projectKey: text("projectKey"),
+    agentName: text("agentName").notNull(),
+    sessionId: text("sessionId").notNull().default(""),
+    status: text("status", { enum: ["pending", "approved", "rejected"] }).default("pending").notNull(),
+    documentId: text("documentId"),
+    reviewedAt: timestamp("reviewed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("memory_proposals_status").on(t.status)]
+)
+
 export const projects = pgTable(
   "projects",
   {
@@ -156,7 +175,7 @@ export const projects = pgTable(
       .primaryKey()
       .$defaultFn(() => createId()),
     name: text("name").notNull(),
-    rootPath: text("root_path").notNull().unique(),
+    rootPath: text("rootPath").notNull().unique(),
     metadata: jsonb("metadata"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")

@@ -5,6 +5,7 @@ import { readFiles } from "./readfile";
 import { handleEmbeddingJob, handleExtractionJob, outcomes } from "./worker";
 import { entityProfile, keywordSearch } from "core";
 import { backfillFactEmbeddings } from "core";
+import { listProposals } from "db";
 
 const program = new Command();
 
@@ -270,6 +271,16 @@ program
         opts.json,
       );
     }
+  });
+
+program
+  .command("review")
+  .description("Review proposed memory before adding a new memory")
+  .option("--json", "print the final work summary as JSON")
+  .action(async (opts) => {
+    const proposals = await listProposals()
+
+    if (!proposals) return;
   });
 
 await program.parseAsync();

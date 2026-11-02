@@ -11,3 +11,4 @@ export * from "./documents";
 export * from "./ingest";
 export * from "./facts";
 export * from "./entities";
+export * from "./proposals";
