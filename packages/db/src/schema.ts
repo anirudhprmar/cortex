@@ -23,10 +23,10 @@ export const documents = pgTable("documents", {
   content: text("content").notNull(),
   contentHash: text("contentHash").notNull(),
   extractedHash:text('extractedHash'),
-  modality: text("modality", { enum: ["markdown", "text"] })
+  modality: text("modality", { enum: ["markdown", "text", "memory"] })
     .notNull()
     .default("markdown"),
-  scope: text("scope").notNull().default("personal"),
+  scope: text("scope", {enum: ["personal","work"]}).notNull().default("personal"),
   projectKey: text("projectKey"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
@@ -162,6 +162,10 @@ export const memoryProposals = pgTable(
     sessionId: text("sessionId").notNull().default(""),
     status: text("status", { enum: ["pending", "approved", "rejected"] }).default("pending").notNull(),
     documentId: text("documentId"),
+    supersedesFactId: varchar("supersedesFactId", { length: 128 }).references(
+      (): AnyPgColumn => facts.id,
+      { onDelete: "set null" },
+    ),
     reviewedAt: timestamp("reviewed_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },

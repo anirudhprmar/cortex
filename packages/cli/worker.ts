@@ -93,6 +93,19 @@ export async function handleExtractionJob(
     contentHash,
   );
 
+  // If this document came from an approved proposal with a supersede choice,
+  // point the old fact's supersededBy at the new facts now that they exist.
+  try {
+    const { applySupersededBy } = await import("db");
+    if (await applySupersededBy(docId)) {
+      console.error(`[worker] supersede applied for document ${docId}`);
+    }
+  } catch (err) {
+    console.error(
+      `[worker] failed to apply supersede for document ${docId}: ${(err as Error).message}`,
+    );
+  }
+
   // Extraction committed; queue the embedding pass for this document's
   // new facts so vectors fill in without a global scan.
   const { publish } = await import("queue");

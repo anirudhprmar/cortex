@@ -19,6 +19,23 @@ interface LocatedMarkdownChunk {
 }
 
 export function chunkMd(markdownText: string, filePath:string): LocatedMarkdownChunk[] {
+  // Memory documents (approved proposals) are single short statements:
+  // one chunk covering the whole text, no heading splitting.
+  if (filePath.startsWith("memory://")) {
+    const content = markdownText.trim();
+    if (!content) return [];
+    return [
+      {
+        locator: {
+          filePath,
+          headingPath: [],
+          lineRange: { start: 1, end: content.split("\n").length },
+        },
+        content,
+      },
+    ];
+  }
+
   const processor = unified().use(remarkParse).use(remarkFrontmatter, ['yaml', 'toml'])
 
   const tree = processor.parse(markdownText) as Root;

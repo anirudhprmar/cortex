@@ -38,7 +38,7 @@ export const insertDocSchema = z.object({
   title: z.string().optional(),
   content: z.string(),
   contentHash: z.string().length(64),
-  modality: z.enum(["markdown", "text"]).default("markdown"),
+  modality: z.enum(["markdown", "text", "memory"]).default("markdown"),
   scope: z.enum(["work", "personal"]).default("personal"),
   // null = user-level memory; set = project-level memory (root path)
   projectKey: z.string().nullish()
@@ -48,7 +48,7 @@ export const updateDocSchema = z.object({
   title: z.string().optional(),
   content: z.string().optional(),
   contentHash: z.string().length(64).optional(),
-  modality: z.enum(["markdown", "text"]).optional(),
+  modality: z.enum(["markdown", "text", "memory"]).optional(),
   scope: z.enum(["work", "personal"]).optional(),
   projectKey: z.string().nullish()
 })

@@ -1,11 +1,22 @@
 import { Command } from "commander";
 import { hostname } from "node:os";
+import os from "node:os";
+import { rmSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import * as readline from "node:readline";
 import { resolvePath } from "./path-resolve";
 import { readFiles } from "./readfile";
 import { handleEmbeddingJob, handleExtractionJob, outcomes } from "./worker";
-import { entityProfile, keywordSearch } from "core";
+import { entityProfile, keywordSearch, nearestFacts } from "core";
 import { backfillFactEmbeddings } from "core";
-import { listProposals } from "db";
+import {
+  approveProposal,
+  getProposal,
+  listProposals,
+  rejectProposal,
+  type Proposal,
+} from "db";
 
 const program = new Command();
 
@@ -19,6 +30,180 @@ function emit(payload: unknown, human: () => void, json?: boolean) {
 
 function exitNow() {
   process.exit(process.exitCode ?? 0);
+}
+
+function printProposals(rows: { total: number; allProposals: Proposal[] }) {
+  console.log(`${rows.total} pending proposal(s)`);
+  if (rows.total === 0) {
+    console.log("Nothing to review.");
+    return;
+  }
+  rows.allProposals.forEach((prop, i) => {
+    const created = prop.createdAt instanceof Date ? prop.createdAt.toISOString() : String(prop.createdAt);
+    console.log(`\n${i + 1}. [${prop.id}] ${prop.agentName} · ${created}`);
+    console.log(
+      `   level: ${prop.level}${prop.projectKey ? `, project: ${prop.projectKey}` : ""}`,
+    );
+    console.log(`   ${prop.memory}`);
+  });
+  console.log(
+    "\ncommands: approve <id> [supersede <factId>] | edit <id> [supersede <factId>] | reject <id> | list | quit",
+  );
+}
+
+/* Known gap: if enqueue fails, the approved document exists with a null
+   extracted_hash and no queued job. Re-running the enqueue or a startup sweep
+   over documents with null extracted_hash fixes it. */
+async function enqueueExtraction(
+  docId: string,
+  contentHash: string,
+): Promise<"queued" | string> {
+  try {
+    const { publish } = await import("queue");
+    await publish("document-extraction", { docId, contentHash });
+    return "queued";
+  } catch (err) {
+    return `failed: ${(err as Error).message}`;
+  }
+}
+
+/** Duplicate check before approving: closest existing facts, same level+project. */
+async function showDuplicateCheck(
+  text: string,
+  projectKey: string | null,
+  json: boolean,
+): Promise<{ factId: string; claim: string; docPath: string; scope: string; similarity: number }[] | "unavailable"> {
+  try {
+    const matches = await nearestFacts(text, projectKey, 5);
+    if (!json) {
+      if (matches.length === 0) {
+        console.log("No similar facts found — nothing looks duplicated.");
+      } else {
+        console.log("Closest existing facts:");
+        for (const m of matches) {
+          console.log(
+            `  • [${m.factId}] similarity ${m.similarity.toFixed(2)}  ${m.claim}  (${m.docPath})`,
+          );
+        }
+      }
+    }
+    return matches;
+  } catch (err) {
+    console.error(
+      `[duplicate check unavailable] ${(err as Error).message} — proceeding without matches.`,
+    );
+    return "unavailable";
+  }
+}
+
+function openInEditor(text: string): string | null {
+  const file = path.join(os.tmpdir(), `cortex-proposal-${Date.now()}.txt`);
+  writeFileSync(file, text);
+  const editor =
+    process.env.EDITOR || (process.platform === "win32" ? "notepad" : "vi");
+  const res = spawnSync(editor, [file], { stdio: "inherit" });
+  rmSync(file, { force: true });
+  if (res.error) {
+    console.error(`Failed to open editor "${editor}": ${res.error.message}`);
+    return null;
+  }
+  return readFileSync(file, "utf-8").replace(/\r\n/g, "\n").trim();
+}
+
+type ApproveOptions = { supersede?: string | null; edit?: boolean; json?: boolean };
+
+async function runApprove(proposalId: string, opts: ApproveOptions): Promise<void> {
+  const proposal = await getProposal(proposalId);
+  if (!proposal) throw new Error(`No proposal with id ${proposalId}`);
+  if (proposal.status !== "pending") {
+    throw new Error(`Proposal ${proposalId} is already ${proposal.status}`);
+  }
+
+  let text = proposal.memory;
+  if (opts.edit) {
+    const edited = openInEditor(text);
+    if (!edited) throw new Error("Edited text is empty; approval aborted");
+    text = edited;
+  }
+
+  const matches = await showDuplicateCheck(text, proposal.projectKey, !!opts.json);
+
+  const result = await approveProposal(proposalId, {
+    editedText: opts.edit ? text : undefined,
+    supersedesFactId: opts.supersede ?? null,
+  });
+
+  const queued = await enqueueExtraction(result.docId, result.contentHash);
+  emit(
+    {
+      proposalId: result.proposalId,
+      docId: result.docId,
+      approved: result.approved,
+      supersede: opts.supersede ?? null,
+      duplicatesChecked: matches === "unavailable" ? false : true,
+      duplicateMatches: matches === "unavailable" ? [] : matches,
+      queued,
+    },
+    () =>
+      console.log(
+        `Approved ${result.proposalId} → document ${result.docId} (extraction ${queued})`,
+      ),
+    opts.json,
+  );
+}
+
+async function runReject(proposalId: string, json?: boolean): Promise<void> {
+  const result = await rejectProposal(proposalId);
+  emit(
+    result,
+    () => console.log(`Rejected ${result.id} (kept for future recognition)`),
+    json,
+  );
+}
+
+async function runReviewLoop() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  const ask = (question: string) =>
+    new Promise<string>((resolve) => rl.question(question, resolve));
+
+  try {
+    for (;;) {
+      const line = (await ask("review> ")).trim();
+      if (!line) continue;
+      const tokens = line.split(/\s+/);
+      const [verb, id, flag, flagValue] = tokens;
+
+      try {
+        if (verb === "quit" || verb === "q" || verb === "exit") break;
+        else if (verb === "list") printProposals(await listProposals());
+        else if (
+          (verb === "approve" || verb === "edit") &&
+          id &&
+          (!flag || flag === "supersede")
+        ) {
+          await runApprove(id, {
+            supersede: flag === "supersede" ? flagValue : null,
+            edit: verb === "edit",
+          });
+          printProposals(await listProposals());
+        } else if (verb === "reject" && id) {
+          await runReject(id);
+          printProposals(await listProposals());
+        } else {
+          console.log(
+            "commands: approve <id> [supersede <factId>] | edit <id> [supersede <factId>] | reject <id> | list | quit",
+          );
+        }
+      } catch (err) {
+        console.error((err as Error).message);
+      }
+    }
+  } finally {
+    rl.close();
+  }
 }
 
 program
@@ -275,12 +460,62 @@ program
 
 program
   .command("review")
-  .description("Review proposed memory before adding a new memory")
-  .option("--json", "print the final work summary as JSON")
+  .description("List pending memory proposals, then interactively approve, edit, or reject")
+  .option("--json", "print pending proposals as JSON and exit (non-interactive)")
   .action(async (opts) => {
-    const proposals = await listProposals()
+    try {
+      const proposals = await listProposals();
+      if (opts.json) {
+        emit(proposals, () => {}, true);
+      } else {
+        printProposals(proposals);
+        if (proposals.total > 0) {
+          await runReviewLoop();
+        }
+      }
+    } catch (err) {
+      console.error((err as Error).message);
+      process.exitCode = 1;
+    } finally {
+      exitNow();
+    }
+  });
 
-    if (!proposals) return;
+program
+  .command("approve")
+  .description("Approve a pending proposal: duplicate check, then create its memory:// source document and queue extraction")
+  .argument("<proposalId>", "pending proposal id shown by cortex review")
+  .option(
+    "--supersede <factId>",
+    "existing fact to supersede once the new document's facts are extracted",
+  )
+  .option("--edit", "open the proposal text in $EDITOR and approve the edited version")
+  .option("--json", "print the approval result as JSON")
+  .action(async (proposalId, opts) => {
+    try {
+      await runApprove(proposalId, opts);
+    } catch (err) {
+      console.error((err as Error).message);
+      process.exitCode = 1;
+    } finally {
+      exitNow();
+    }
+  });
+
+program
+  .command("reject")
+  .description("Reject a pending proposal (single update; the row is kept)")
+  .argument("<proposalId>", "pending proposal id shown by cortex review")
+  .option("--json", "print the rejection result as JSON")
+  .action(async (proposalId, opts) => {
+    try {
+      await runReject(proposalId, opts.json);
+    } catch (err) {
+      console.error((err as Error).message);
+      process.exitCode = 1;
+    } finally {
+      exitNow();
+    }
   });
 
 await program.parseAsync();
