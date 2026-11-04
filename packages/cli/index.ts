@@ -12,7 +12,10 @@ import { entityProfile, keywordSearch, nearestFacts } from "core";
 import { backfillFactEmbeddings } from "core";
 import {
   approveProposal,
+  ENTITY_TYPES,
+  entityCandidatesForProposal,
   getProposal,
+  listEntities,
   listProposals,
   rejectProposal,
   type Proposal,
@@ -47,24 +50,8 @@ function printProposals(rows: { total: number; allProposals: Proposal[] }) {
     console.log(`   ${prop.memory}`);
   });
   console.log(
-    "\ncommands: approve <id> [supersede <factId>] | edit <id> [supersede <factId>] | reject <id> | list | quit",
+    "\ncommands: approve <id> [supersede <factId>] | edit <id> [supersede <factId>] | reject <id> | list | quit (approve/edit prompts to link entities)",
   );
-}
-
-/* Known gap: if enqueue fails, the approved document exists with a null
-   extracted_hash and no queued job. Re-running the enqueue or a startup sweep
-   over documents with null extracted_hash fixes it. */
-async function enqueueExtraction(
-  docId: string,
-  contentHash: string,
-): Promise<"queued" | string> {
-  try {
-    const { publish } = await import("queue");
-    await publish("document-extraction", { docId, contentHash });
-    return "queued";
-  } catch (err) {
-    return `failed: ${(err as Error).message}`;
-  }
 }
 
 /** Duplicate check before approving: closest existing facts, same level+project. */
@@ -110,7 +97,111 @@ function openInEditor(text: string): string | null {
   return readFileSync(file, "utf-8").replace(/\r\n/g, "\n").trim();
 }
 
-type ApproveOptions = { supersede?: string | null; edit?: boolean; json?: boolean };
+type ApproveOptions = {
+  supersede?: string | null;
+  edit?: boolean;
+  json?: boolean;
+  entities?: { name: string; type: string }[];
+  /** Prompt function from the caller's readline loop, so only one reader owns stdin. */
+  ask?: (question: string) => Promise<string>;
+};
+
+/** Parse an approve --entities spec: comma-separated "Name:TYPE" pairs. */
+function parseEntitiesSpec(
+  spec: string | undefined,
+): { name: string; type: string }[] | undefined {
+  if (spec == null) return undefined;
+  return spec
+    .split(",")
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .map((token) => {
+      const colon = token.lastIndexOf(":");
+      if (colon === -1) {
+        throw new Error(
+          `Invalid entity "${token}"; expected name:type with type in ${ENTITY_TYPES.join(", ")}`,
+        );
+      }
+      const name = token.slice(0, colon).trim();
+      const type = token.slice(colon + 1).trim();
+      if (!name || !ENTITY_TYPES.includes(type)) {
+        throw new Error(
+          `Invalid entity "${token}"; use name:type with type in ${ENTITY_TYPES.join(", ")}`,
+        );
+      }
+      return { name, type };
+    });
+}
+
+/**
+ * Interactive entity picking for the review flow: the reviewer links from
+ * existing entities (suggestion number or typed Name:TYPE pairs); new
+ * entities are created only when both name and type are new, which the
+ * approval transaction itself rejects otherwise.
+ */
+async function pickEntities(
+  proposalText: string,
+  ask: (question: string) => Promise<string>,
+): Promise<{ name: string; type: string }[]> {
+  for (;;) {
+      const candidates = await entityCandidatesForProposal(proposalText);
+      if (candidates.length > 0) {
+        console.log("Entities whose names appear in the proposal:");
+        candidates.forEach((e, i) =>
+          console.log(`  ${i + 1}. ${e.name} (${e.type})`),
+        );
+      }
+      const line = (
+        await ask(
+          "Link entities (number or Name:TYPE, comma-separated; 'list' for all; blank to skip): ",
+        )
+      ).trim();
+
+      if (line.length === 0) return [];
+      if (line === "list" || line === "?") {
+        const all = await listEntities({ limit: 50 });
+        console.log("Existing entities:");
+        for (const e of all) {
+          console.log(
+            `  • [${e.id}] ${e.name} (${e.type}) — ${e.factCount} fact(s)`,
+          );
+        }
+        continue;
+      }
+
+      const picks: { name: string; type: string }[] = [];
+      let invalid = false;
+      for (const token of line
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)) {
+        const numbered = token.match(/^\d+$/);
+        if (numbered) {
+          const candidate = candidates[Number(token) - 1];
+          if (!candidate) {
+            console.error(`No candidate number ${token}.`);
+            invalid = true;
+            break;
+          }
+          picks.push({ name: candidate.name, type: candidate.type });
+          continue;
+        }
+        const colon = token.lastIndexOf(":");
+        const name = colon === -1 ? token : token.slice(0, colon).trim();
+        const type = colon === -1 ? "" : token.slice(colon + 1).trim();
+        if (!name || !ENTITY_TYPES.includes(type)) {
+          console.error(
+            `Invalid "${token}"; use a candidate number or Name:TYPE with type in ${ENTITY_TYPES.join(", ")}.`,
+          );
+          invalid = true;
+          break;
+        }
+        picks.push({ name, type });
+      }
+      if (invalid) continue;
+      return picks;
+    }
+}
 
 async function runApprove(proposalId: string, opts: ApproveOptions): Promise<void> {
   const proposal = await getProposal(proposalId);
@@ -128,25 +219,48 @@ async function runApprove(proposalId: string, opts: ApproveOptions): Promise<voi
 
   const matches = await showDuplicateCheck(text, proposal.projectKey, !!opts.json);
 
+  let entities = opts.entities;
+  if (!entities && !opts.json) {
+    if (!opts.ask) {
+      throw new Error("No prompt available to pick entities");
+    }
+    entities = await pickEntities(text, opts.ask);
+  }
+
   const result = await approveProposal(proposalId, {
     editedText: opts.edit ? text : undefined,
     supersedesFactId: opts.supersede ?? null,
+    entities,
   });
 
-  const queued = await enqueueExtraction(result.docId, result.contentHash);
+  // The new fact's embedding is null, so the embedding pass fills it in as
+  // soon as its job runs. Publication failure is non-fatal: "cortex embed"
+  // backfills any fact without a vector.
+  let queuedEmbedding: string;
+  try {
+    const { publish } = await import("queue");
+    await publish("fact-embedding", { docId: result.docId });
+    queuedEmbedding = "queued";
+  } catch (err) {
+    queuedEmbedding = `failed: ${(err as Error).message} (run "cortex embed" to backfill)`;
+  }
+
   emit(
     {
       proposalId: result.proposalId,
       docId: result.docId,
+      factId: result.factId,
+      extractionModel: result.extractionModel,
       approved: result.approved,
       supersede: opts.supersede ?? null,
+      queuedEmbedding,
       duplicatesChecked: matches === "unavailable" ? false : true,
       duplicateMatches: matches === "unavailable" ? [] : matches,
-      queued,
+      entitiesLinked: result.entities,
     },
     () =>
       console.log(
-        `Approved ${result.proposalId} → document ${result.docId} (extraction ${queued})`,
+        `Approved ${result.proposalId} → document ${result.docId}, fact ${result.factId} (${result.extractionModel}; ${result.entities.length} entity link(s))`,
       ),
     opts.json,
   );
@@ -161,16 +275,50 @@ async function runReject(proposalId: string, json?: boolean): Promise<void> {
   );
 }
 
-async function runReviewLoop() {
+/**
+ * Line reader for interactive prompts. Bun's readline only resolves one
+ * rl.question per interface with piped stdin, so prompts are pulled from a
+ * single "line" listener queue instead of repeated questions.
+ */
+function lineReader(): {
+  ask: (question: string) => Promise<string>;
+  atEof: () => boolean;
+  close: () => void;
+} {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
-  const ask = (question: string) =>
-    new Promise<string>((resolve) => rl.question(question, resolve));
+  const queue: string[] = [];
+  const waiters: ((line: string) => void)[] = [];
+  let closed = false;
+  rl.on("line", (line: string) => {
+    if (waiters.length > 0) waiters.shift()!(line);
+    else queue.push(line);
+  });
+  rl.on("close", () => {
+    closed = true;
+    while (waiters.length > 0) waiters.shift()!("");
+  });
+  return {
+    ask: (question: string) => {
+      process.stdout.write(question);
+      if (queue.length > 0) return Promise.resolve(queue.shift()!);
+      if (closed) return Promise.resolve("");
+      return new Promise<string>((resolve) => waiters.push(resolve));
+    },
+    atEof: () => closed && queue.length === 0,
+    close: () => rl.close(),
+  };
+}
+
+async function runReviewLoop() {
+  const reader = lineReader();
+  const { ask } = reader;
 
   try {
     for (;;) {
+      if (reader.atEof()) break;
       const line = (await ask("review> ")).trim();
       if (!line) continue;
       const tokens = line.split(/\s+/);
@@ -185,6 +333,7 @@ async function runReviewLoop() {
           (!flag || flag === "supersede")
         ) {
           await runApprove(id, {
+            ask,
             supersede: flag === "supersede" ? flagValue : null,
             edit: verb === "edit",
           });
@@ -194,7 +343,7 @@ async function runReviewLoop() {
           printProposals(await listProposals());
         } else {
           console.log(
-            "commands: approve <id> [supersede <factId>] | edit <id> [supersede <factId>] | reject <id> | list | quit",
+            "commands: approve <id> [supersede <factId>] | edit <id> [supersede <factId>] | reject <id> | list | quit (approve/edit prompts to link entities)",
           );
         }
       } catch (err) {
@@ -202,7 +351,7 @@ async function runReviewLoop() {
       }
     }
   } finally {
-    rl.close();
+    reader.close();
   }
 }
 
@@ -483,21 +632,36 @@ program
 
 program
   .command("approve")
-  .description("Approve a pending proposal: duplicate check, then create its memory:// source document and queue extraction")
+  .description(
+    "Approve a pending proposal: writes the document, chunk, fact, and entity links with no LLM call",
+  )
   .argument("<proposalId>", "pending proposal id shown by cortex review")
   .option(
     "--supersede <factId>",
-    "existing fact to supersede once the new document's facts are extracted",
+    "existing fact to supersede once the new fact is written",
   )
   .option("--edit", "open the proposal text in $EDITOR and approve the edited version")
+  .option(
+    "--entities <spec>",
+    'entities to link as comma-separated "Name:TYPE" pairs (types: tool, person, concept, organization, project, place, event, other)',
+  )
   .option("--json", "print the approval result as JSON")
   .action(async (proposalId, opts) => {
+    const reader = lineReader();
     try {
-      await runApprove(proposalId, opts);
+      const entities = parseEntitiesSpec(opts.entities);
+      await runApprove(proposalId, {
+        supersede: opts.supersede,
+        edit: opts.edit,
+        json: opts.json,
+        entities,
+        ask: reader.ask,
+      });
     } catch (err) {
       console.error((err as Error).message);
       process.exitCode = 1;
     } finally {
+      reader.close();
       exitNow();
     }
   });

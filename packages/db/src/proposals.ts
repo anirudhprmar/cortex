@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, asc, desc, eq, gt } from "drizzle-orm";
+import { getTableColumns } from "drizzle-orm";
 import { db } from "./index";
-import { documents, facts, memoryProposals } from "./schema";
+import { chunks, documents, entities, factEntities, facts, memoryProposals } from "./schema";
 
 export type Proposal = typeof memoryProposals.$inferSelect;
 
@@ -56,19 +57,30 @@ export async function getProposal(proposalId: string) {
 
 export class ProposalError extends Error {}
 
+/** Entity types allowed for manual linking, mirroring the schema enum. */
+export const ENTITY_TYPES: readonly string[] = getTableColumns(entities).type
+  .enumValues as readonly string[];
+
+export type EntityPick = { name: string; type: string };
+
 /**
- * Approve a pending proposal atomically: mint the memory:// source document
- * and flip the proposal to approved in one transaction. Facts are NOT written
- * here — extraction of the new document produces them through the normal
- * pipeline. Extraction must be enqueued by the caller AFTER this commits.
+ * Approve a pending proposal synchronously, with no LLM call: in one
+ * transaction, mint the memory://<proposal-id> source document, one chunk
+ * holding the approved text, one fact with that text as claim (extraction
+ * model "verbatim" for unchanged text, "manual" for reviewer-edited text),
+ * link the reviewer-picked entities, apply the supersede choice, and flip
+ * the proposal to approved with its documentId. The embedding pass picks
+ * up the new fact automatically because its embedding is null.
  */
 export async function approveProposal(
   proposalId: string,
   opts: {
     /** Reviewer-edited text (from cortex review edit). Applied to the document only. */
     editedText?: string;
-    /** Existing fact this approval supersedes; applied post-extraction. */
+    /** Existing fact this approval supersedes; applied immediately here. */
     supersedesFactId?: string | null;
+    /** Entities to link to the new fact, per the manual-linking rules. */
+    entities?: EntityPick[];
   } = {},
 ) {
   const proposal = await getProposal(proposalId);
@@ -82,16 +94,8 @@ export async function approveProposal(
   }
 
   const supersedesFactId = opts.supersedesFactId ?? null;
-  if (supersedesFactId) {
-    const [factRow] = await db
-      .select({ id: facts.id })
-      .from(facts)
-      .where(eq(facts.id, supersedesFactId))
-      .limit(1);
-    if (!factRow) {
-      throw new ProposalError(`No fact with id ${supersedesFactId} to supersede`);
-    }
-  }
+
+  const picks = normalizeEntityPicks(opts.entities ?? []);
 
   const content = opts.editedText?.trim() || proposal.memory;
   if (content.length === 0) {
@@ -101,8 +105,22 @@ export async function approveProposal(
   // Level -> scope mapping for the source document: user -> personal,
   // project -> work.
   const scope = proposal.level === "project" ? "work" : "personal";
+  const extractionModel = opts.editedText ? "manual" : "verbatim";
 
-  const { docId } = await db.transaction(async (tx) => {
+  const { docId, factId, linkedEntities } = await db.transaction(async (tx) => {
+    if (supersedesFactId) {
+      const [factRow] = await tx
+        .select({ id: facts.id })
+        .from(facts)
+        .where(eq(facts.id, supersedesFactId))
+        .limit(1);
+      if (!factRow) {
+        throw new ProposalError(
+          `No fact with id ${supersedesFactId} to supersede`,
+        );
+      }
+    }
+
     const [doc] = await tx
       .insert(documents)
       .values({
@@ -118,6 +136,88 @@ export async function approveProposal(
 
     if (!doc) {
       throw new Error(`Failed to create memory document for ${proposalId}`);
+    }
+
+    const [chunk] = await tx
+      .insert(chunks)
+      .values({
+        docId: doc.id,
+        ordinal: 0,
+        headingPath: "[]",
+        startLine: 1,
+        endLine: content.split("\n").length,
+        content,
+      })
+      .returning({ id: chunks.id });
+
+    if (!chunk) {
+      throw new Error(`Failed to create chunk for proposal ${proposalId}`);
+    }
+
+    const [fact] = await tx
+      .insert(facts)
+      .values({
+        claim: content,
+        docId: doc.id,
+        chunkId: chunk.id,
+        scope,
+        projectKey: proposal.projectKey,
+        extractionModel,
+      })
+      .returning({ id: facts.id });
+
+    if (!fact) {
+      throw new Error(`Failed to create fact for proposal ${proposalId}`);
+    }
+
+    if (supersedesFactId) {
+      await tx
+        .update(facts)
+        .set({ supersededBy: fact.id })
+        .where(eq(facts.id, supersedesFactId));
+    }
+
+    // Manual-linking rule: an entity is created only when both its name and
+    // type are new; if the name already exists under another type, approve
+    // fails so the (name, type) pairs stay consistent.
+    const linkedEntities: EntityPick[] = [];
+    for (const pick of picks) {
+      const existing = await tx
+        .select({ type: entities.type })
+        .from(entities)
+        .where(eq(entities.name, pick.name));
+
+      const sameNameOtherType = existing.find(
+        (row) => String(row.type) !== pick.type,
+      );
+      if (sameNameOtherType) {
+        throw new ProposalError(
+          `Entity "${pick.name}" already exists as type "${sameNameOtherType.type}"; pick that type or a new name.`,
+        );
+      }
+
+      await tx
+        .insert(entities)
+        .values({ name: pick.name, type: pick.type as EntityPickType })
+        .onConflictDoNothing({ target: [entities.name, entities.type] });
+
+      const [storedEntity] = await tx
+        .select({ id: entities.id })
+        .from(entities)
+        .where(
+          and(eq(entities.name, pick.name), eq(entities.type, pick.type as EntityPickType)),
+        )
+        .limit(1);
+
+      if (!storedEntity) {
+        throw new Error(`Failed to resolve picked entity: ${pick.name}`);
+      }
+
+      await tx
+        .insert(factEntities)
+        .values({ factId: fact.id, entityId: storedEntity.id });
+
+      linkedEntities.push(pick);
     }
 
     const [updated] = await tx
@@ -140,10 +240,65 @@ export async function approveProposal(
       throw new Error(`Proposal ${proposalId} was no longer pending`);
     }
 
-    return { docId: doc.id, contentHash };
+    // Mark the document as processed so a future sweep over documents with a
+    // null extracted_hash never re-runs LLM extraction on a manual memory doc.
+    await tx
+      .update(documents)
+      .set({ extractedHash: contentHash })
+      .where(eq(documents.id, doc.id));
+
+    return { docId: doc.id, factId: fact.id, linkedEntities };
   });
 
-  return { proposalId: proposal.id, docId, contentHash, approved: content };
+  return {
+    proposalId: proposal.id,
+    docId,
+    factId,
+    extractionModel,
+    approved: content,
+    entities: linkedEntities,
+  };
+}
+
+type EntityPickType = NonNullable<(typeof entities.$inferInsert)["type"]>;
+
+/** Validate and deduplicate entity picks before any transaction runs. */
+function normalizeEntityPicks(picks: EntityPick[]): EntityPick[] {
+  const unique = new Map<string, EntityPick>();
+  for (const pick of picks) {
+    const name = pick.name.trim();
+    const type = pick.type.trim();
+    if (!ENTITY_TYPES.includes(type)) {
+      throw new ProposalError(
+        `Invalid entity type "${type}"; use one of ${ENTITY_TYPES.join(", ")}.`,
+      );
+    }
+    if (name.length === 0) {
+      throw new ProposalError("Entity name is empty.");
+    }
+    unique.set(`${pick.type}\0${name}`, { name, type });
+  }
+  return [...unique.values()];
+}
+
+/**
+ * Existing entities whose names appear in the proposal text: candidates for
+ * the reviewer to link without typing names by hand.
+ */
+export async function entityCandidatesForProposal(
+  text: string,
+  limit = 50,
+) {
+  const rows = await db
+    .select({ id: entities.id, name: entities.name, type: entities.type })
+    .from(entities)
+    .orderBy(asc(entities.name));
+  const lower = text.toLowerCase();
+  return rows
+    .filter(
+      (row) => row.name.length >= 2 && lower.includes(row.name.toLowerCase()),
+    )
+    .slice(0, limit);
 }
 
 /**
