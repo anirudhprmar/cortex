@@ -1,0 +1,23 @@
+{
+  "name": "api",
+  "module": "src/server.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun --watch --env-file=../../.env src/server.ts",
+    "start": "bun --env-file=../../.env src/server.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^7"
+  },
+  "peerDependencies": {
+    "typescript": "^7"
+  },
+  "dependencies": {
+    "core": "workspace:*",
+    "db": "workspace:*",
+    "hono": "^4.10.8",
+    "zod": "^4.6.6"
+  }
+}

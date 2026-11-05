@@ -2,3 +2,8 @@ export * from "./keyword-search";
 export * from "./entity-profile";
 export * from "./embedding";
 export * from "./nearest-facts";
+export * from "./status";
+export * from "./documents";
+export * from "./entities";
+export * from "./timeline";
+export * from "./graph";
