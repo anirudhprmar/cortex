@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { ZodError } from "zod";
 import {
   entityGraph,
   entityProfile,
@@ -8,28 +9,27 @@ import {
   listDocuments,
   listEntities,
 } from "core";
+import {
+  documentsQuerySchema,
+  entitiesQuerySchema,
+  graphQuerySchema,
+  parseQuery,
+  profileQuerySchema,
+  timelineQuerySchema,
+} from "./params";
 
 const app = new Hono();
 
-const listParams = (url: URL) => {
-  const limit = Number(url.searchParams.get("limit") ?? "50");
-  const offset = Number(url.searchParams.get("offset") ?? "0");
-  return {
-    limit: Number.isInteger(limit) ? limit : 50,
-    offset: Number.isInteger(offset) ? offset : 0,
-  };
-};
+const queryFromSearch = (url: URL): Record<string, string> =>
+  Object.fromEntries(url.searchParams.entries());
 
-const scopeParam = (url: URL) => url.searchParams.get("scope") ?? undefined;
-
-const projectKeyParam = (url: URL) => {
-  if (!url.searchParams.has("projectKey")) return undefined;
-  const value = url.searchParams.get("projectKey");
-  return value === "" ? null : value;
-};
-
-const notFound = (c: { json: (body: unknown, status?: number) => Response }) =>
-  c.json({ error: "not found" }, 404);
+app.onError((err, c) => {
+  if (err instanceof ZodError) {
+    return c.json({ error: err.issues[0]?.message ?? "invalid request" }, 400);
+  }
+  console.error(err);
+  return c.json({ error: (err as Error).message }, 500);
+});
 
 app.get("/", (c) =>
   c.json({
@@ -48,61 +48,32 @@ app.get("/", (c) =>
 
 app.get("/status", async (c) => c.json(await getStatusOverview()));
 
-app.get("/documents", async (c) => {
-  const url = new URL(c.req.url);
-  return c.json(
-    await listDocuments({
-      scope: scopeParam(url),
-      projectKey: projectKeyParam(url),
-      ...listParams(url),
-    }),
-  );
-});
+app.get("/documents", async (c) =>
+  c.json(
+    await listDocuments(
+      parseQuery(documentsQuerySchema, queryFromSearch(new URL(c.req.url))),
+    ),
+  ),
+);
 
 app.get("/documents/:id", async (c) => {
   const document = await getDocumentById(c.req.param("id"));
-  if (!document) return notFound(c);
+  if (!document) return c.json({ error: "not found" }, 404);
   return c.json(document);
 });
 
-app.get("/entities", async (c) => {
-  const url = new URL(c.req.url);
-  const type = c.req.query("type");
-  let entityIdType: import("db").entities.$inferSelect["type"] | undefined;
-  const validTypes = [
-    "tool",
-    "person",
-    "concept",
-    "organization",
-    "project",
-    "place",
-    "event",
-    "other",
-  ] as const;
-  if (type) {
-    if (!(validTypes as readonly string[]).includes(type)) {
-      return c.json(
-        { error: `type must be one of ${validTypes.join(", ")}` },
-        400,
-      );
-    }
-    entityIdType = type as (typeof validTypes)[number];
-  }
-  return c.json(
-    await listEntities({ type: entityIdType, ...listParams(url) }),
-  );
-});
+app.get("/entities", async (c) =>
+  c.json(
+    await listEntities(
+      parseQuery(entitiesQuerySchema, queryFromSearch(new URL(c.req.url))),
+    ),
+  ),
+);
 
 app.get("/entity-profile", async (c) => {
   const url = new URL(c.req.url);
-  const name = url.searchParams.get("name");
-  if (!name) return c.json({ error: "name query param is required" }, 400);
-
-  const result = await entityProfile({
-    name,
-    scope: scopeParam(url),
-    projectKey: projectKeyParam(url),
-  });
+  const query = parseQuery(profileQuerySchema, queryFromSearch(url));
+  const result = await entityProfile(query);
   if (result.status === "notFound") return c.json(result, 404);
   if (result.status === "ambiguous") return c.json(result, 409);
   return c.json(result);
@@ -110,33 +81,19 @@ app.get("/entity-profile", async (c) => {
 
 app.get("/graph", async (c) => {
   const url = new URL(c.req.url);
-  const entity = url.searchParams.get("entity");
-  if (!entity) return c.json({ error: "entity query param is required" }, 400);
-
-  const depthParam = Number(url.searchParams.get("depth") ?? "2");
-  const depth = Number.isInteger(depthParam) ? depthParam : 2;
-  if (depth < 0 || depth > 4) {
-    return c.json({ error: "depth must be between 0 and 4" }, 400);
-  }
-
-  const result = await entityGraph({
-    entityName: entity,
-    depth,
-    scope: scopeParam(url),
-  });
+  const query = parseQuery(graphQuerySchema, queryFromSearch(url));
+  const result = await entityGraph({ ...query, entityName: query.entity });
   if (result.status === "notFound") return c.json(result, 404);
   if (result.status === "ambiguous") return c.json(result, 409);
   return c.json(result);
 });
 
-app.get("/timeline", async (c) => {
-  const url = new URL(c.req.url);
-  return c.json(await getTimeline({ scope: scopeParam(url), ...listParams(url) }));
-});
-
-app.onError((err, c) => {
-  console.error(err);
-  return c.json({ error: (err as Error).message }, 500);
-});
+app.get("/timeline", async (c) =>
+  c.json(
+    await getTimeline(
+      parseQuery(timelineQuerySchema, queryFromSearch(new URL(c.req.url))),
+    ),
+  ),
+);
 
 export default app;
