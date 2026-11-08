@@ -7,5 +7,6 @@
       "enabled": true,
       "environment": {}
     }
-  }
+  },
+  "skills": ["./skills"]
 }
