@@ -8,7 +8,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "check-types": "turbo run check-types",
     "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down"
+    "docker:down": "docker compose down",
+    "cortex": "bun --env-file=.env packages/cli/index.ts"
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.10",

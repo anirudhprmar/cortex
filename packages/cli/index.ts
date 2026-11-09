@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 import { Command } from "commander";
 import { hostname } from "node:os";
 import os from "node:os";
